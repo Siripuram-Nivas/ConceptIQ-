@@ -1,0 +1,57 @@
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+
+    font-feature-settings: 'cv11', 'ss01';
+    background-color: theme('colors.bg');
+    color: theme('colors.fg');
+  }
+  body {
+    @apply bg-bg text-fg font-body;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  *:focus-visible {
+    @apply outline-none ring-2 ring-offset-2 ring-fg;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* Typography fallback for Degular */
+  h1, h2, h3, h4, h5, h6, .font-display {
+    font-family: theme('fontFamily.display');
+  }
+}
+
+@layer components {
+  .editorial-card {
+    @apply border-2 border-fg bg-surface shadow-editorial transition-all hover:shadow-editorial-hover hover:translate-x-1 hover:translate-y-1;
+  }
+  
+  .editorial-btn {
+    @apply flex items-center justify-center font-bold px-6 py-4 border-2 border-fg shadow-editorial transition-all hover:shadow-editorial-hover hover:translate-x-1 hover:translate-y-1 active:translate-x-1.5 active:translate-y-1.5 active:shadow-none disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .editorial-btn-primary {
+    @apply editorial-btn bg-fg text-bg;
+  }
+
+  .editorial-btn-accent {
+    @apply editorial-btn bg-accent-yellow text-fg;
+  }
+
+  .editorial-btn-outline {
+    @apply editorial-btn bg-surface text-fg;
+  }
+}
