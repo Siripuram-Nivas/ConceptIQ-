@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RotateCcw, Zap } from 'lucide-react';
 import { DemoModeIndicator } from '../components/DemoModeIndicator';
@@ -18,8 +18,17 @@ const DEMO_STAGES = [
 
 export function DemoPage() {
   const navigate = useNavigate();
-  const { resetDemo, startSession } = useSessionStore();
+  const { session, resetDemo, startSession } = useSessionStore();
   const [currentStage, setCurrentStage] = useState(0);
+
+  // If a previous demo run is persisted in a completed state, reset it on mount
+  // so the demo page always starts with canonical data. This only clears the
+  // active session — it does not touch materials or study spaces.
+  useEffect(() => {
+    if (session?.state === 'MASTERY') {
+      resetDemo();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleReset = () => {
     resetDemo();
