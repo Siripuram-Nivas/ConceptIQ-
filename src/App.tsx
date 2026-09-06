@@ -1,6 +1,14 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { BottomNavigation } from './components/BottomNavigation';
+import type { ReactNode } from 'react';
+import { ProtectedRoute, PublicOnlyRoute } from './auth/auth-provider';
+import { AppShell } from './components/Navigation';
+
+// ── Pages ─────────────────────────────────────────────────────────────────────
+import { LandingPage } from './pages/LandingPage';
 import { HomePage } from './pages/HomePage';
+import { LoginPage } from './pages/LoginPage';
+import { SignupPage } from './pages/SignupPage';
+import { OnboardingPage } from './pages/OnboardingPage';
 import { LearnPage } from './pages/LearnPage';
 import { MaterialPage } from './pages/MaterialPage';
 import { TeachPage } from './pages/TeachPage';
@@ -16,32 +24,51 @@ import { TeachMaterialPage } from './pages/TeachMaterialPage';
 import { MyStudySpacesPage } from './pages/MyStudySpacesPage';
 import { StudySpaceDetailPage } from './pages/StudySpaceDetailPage';
 
+// Convenience wrapper to reduce repetition
+function P({ children }: { children: ReactNode }) {
+  return <ProtectedRoute>{children}</ProtectedRoute>;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-bg">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/learn" element={<LearnPage />} />
-          <Route path="/learn/:slug" element={<MaterialPage />} />
-          <Route path="/teach/:slug" element={<TeachPage />} />
-          <Route path="/add-material" element={<AddMaterialPage />} />
-          <Route path="/add-material-to-space/:spaceId" element={<AddMaterialPage />} />
-          <Route path="/material-overview" element={<MaterialOverviewPage />} />
-          <Route path="/material-overview/:materialId" element={<MaterialOverviewPage />} />
-          <Route path="/teach-material/:materialId" element={<TeachMaterialPage />} />
-          <Route path="/study-spaces" element={<MyStudySpacesPage />} />
-          <Route path="/study-space/:spaceId" element={<StudySpaceDetailPage />} />
-          <Route path="/knowledge-map/:spaceId" element={<KnowledgeMapPage />} />
-          <Route path="/analysis" element={<AnalysisPage />} />
-          <Route path="/repair" element={<RepairPage />} />
-          <Route path="/mastery" element={<MasteryPage />} />
-          <Route path="/map" element={<KnowledgeMapPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/demo" element={<DemoPage />} />
-        </Routes>
-        <BottomNavigation />
+      {/* Atmospheric Background Layer (Moved outside AppShell so it spans everything) */}
+      <div className="fixed inset-0 z-[-1] bg-bg overflow-hidden pointer-events-none">
+        <div className="atmospheric-bg">
+          <div className="atmospheric-glow-purple" />
+          <div className="atmospheric-glow-blue" />
+        </div>
       </div>
+
+      <AppShell>
+        <Routes>
+          {/* ── Public routes (no auth required) ──────────────────────── */}
+          <Route path="/"       element={<LandingPage />} />
+          <Route path="/demo"   element={<DemoPage />} />
+          <Route path="/login"  element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
+          <Route path="/signup" element={<PublicOnlyRoute><SignupPage /></PublicOnlyRoute>} />
+
+          {/* ── Protected routes (auth required) ──────────────────────── */}
+          <Route path="/home"                           element={<P><HomePage /></P>} />
+          <Route path="/onboarding"                     element={<P><OnboardingPage /></P>} />
+          <Route path="/learn"                          element={<P><LearnPage /></P>} />
+          <Route path="/learn/:slug"                    element={<P><MaterialPage /></P>} />
+          <Route path="/teach/:slug"                    element={<P><TeachPage /></P>} />
+          <Route path="/add-material"                   element={<P><AddMaterialPage /></P>} />
+          <Route path="/add-material-to-space/:spaceId" element={<P><AddMaterialPage /></P>} />
+          <Route path="/material-overview"              element={<P><MaterialOverviewPage /></P>} />
+          <Route path="/material-overview/:materialId"  element={<P><MaterialOverviewPage /></P>} />
+          <Route path="/teach-material/:materialId"     element={<P><TeachMaterialPage /></P>} />
+          <Route path="/study-spaces"                   element={<P><MyStudySpacesPage /></P>} />
+          <Route path="/study-space/:spaceId"           element={<P><StudySpaceDetailPage /></P>} />
+          <Route path="/knowledge-map/:spaceId"         element={<P><KnowledgeMapPage /></P>} />
+          <Route path="/analysis"                       element={<P><AnalysisPage /></P>} />
+          <Route path="/repair"                         element={<P><RepairPage /></P>} />
+          <Route path="/mastery"                        element={<P><MasteryPage /></P>} />
+          <Route path="/map"                            element={<P><KnowledgeMapPage /></P>} />
+          <Route path="/profile"                        element={<P><ProfilePage /></P>} />
+        </Routes>
+      </AppShell>
     </BrowserRouter>
   );
 }

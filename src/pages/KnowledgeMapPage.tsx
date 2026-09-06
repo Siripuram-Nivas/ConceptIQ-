@@ -44,12 +44,12 @@ export function KnowledgeMapPage() {
   const selectedNode = nodeMap.find((n) => n.id === selected);
 
   return (
-    <div className="min-h-screen bg-bg">
-      <div className="max-w-[1000px] mx-auto px-5 lg:px-10 pt-10 pb-32">
-        <div className="mb-12">
-          <p className="text-sm font-bold uppercase tracking-wider text-muted mb-2">Learning Progress</p>
-          <h1 className="font-display font-bold text-display-xl text-fg leading-none mb-4">KNOWLEDGE MAP</h1>
-          <p className="text-xl font-medium text-fg/80 max-w-2xl border-l-4 border-fg pl-6 py-2">
+    <div className="w-full flex-1 flex flex-col">
+      <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20 pt-8 md:pt-16 pb-32 w-full">
+        <div className="mb-12 border-b border-white/[0.05] pb-10">
+          <p className="text-sm font-bold uppercase tracking-widest text-accent-yellow mb-4">Learning Progress</p>
+          <h1 className="font-display font-black text-[3.5rem] md:text-[5rem] lg:text-[6rem] leading-[0.85] uppercase tracking-tighter text-white mb-6">KNOWLEDGE <br/><span className="text-white/40">MAP</span></h1>
+          <p className="text-xl font-bold uppercase tracking-wide text-white/60 mb-8 max-w-3xl">
             See exactly how concepts connect, what you've mastered, and where you have gaps.
           </p>
         </div>
@@ -66,7 +66,7 @@ export function KnowledgeMapPage() {
                       node.status === 'partial' ? 'bg-accent-yellow text-fg border-accent-yellow' :
                         node.status === 'potential_misconception' || node.status === 'missing' ? 'bg-warning text-bg border-warning' :
                           'bg-surface text-fg border-fg'
-                    } ${selected === node.id ? 'shadow-editorial border-fg' : ''}`}
+                    } ${selected === node.id ? 'shadow-glass border-fg' : ''}`}
                 >
                   <span className="font-bold text-lg">{node.label}</span>
                   <span className="text-sm font-bold uppercase opacity-80">{node.status.replace('_', ' ')}</span>
@@ -77,8 +77,8 @@ export function KnowledgeMapPage() {
 
           <div className="lg:col-span-5">
             {selectedNode ? (
-              <div className="border-4 border-fg bg-surface p-8 shadow-editorial sticky top-10">
-                <div className="mb-6 pb-4 border-b-2 border-fg/20">
+              <div className="glass-panel p-8 shadow-glass sticky top-10">
+                <div className="mb-6 pb-4 border-b border-border/20">
                   <span className={`inline-block px-3 py-1 text-xs font-bold uppercase tracking-wider mb-3 ${selectedNode.status === 'mastered' ? 'bg-success text-bg' :
                       selectedNode.status === 'partial' ? 'bg-accent-yellow text-fg' :
                         selectedNode.status === 'potential_misconception' || selectedNode.status === 'missing' ? 'bg-warning text-bg' :
@@ -133,7 +133,7 @@ export function KnowledgeMapPage() {
         </div>
 
         {!session && (
-          <div className="mt-16 pt-8 border-t-2 border-fg text-center">
+          <div className="mt-16 pt-8 border-t border-border text-center">
             <p className="text-xl font-medium text-fg mb-4">Complete a TeachBack session to see your concept map.</p>
             <Link to="/learn" className="editorial-btn-outline inline-block">Start Learning</Link>
           </div>

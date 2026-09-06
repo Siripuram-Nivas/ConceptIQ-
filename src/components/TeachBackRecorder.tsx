@@ -110,7 +110,7 @@ export function TeachBackRecorder({ onSubmit, disabled, placeholder, demoText, i
           placeholder={placeholder ?? 'Explain the concept here...'}
           disabled={disabled}
           rows={6}
-          className="w-full px-6 py-6 border-4 border-fg bg-surface text-fg text-xl font-medium leading-relaxed resize-none focus:outline-none focus:ring-4 focus:ring-fg transition-all placeholder:text-muted shadow-editorial"
+          className="w-full px-6 py-6 glass-panel text-fg text-xl font-medium leading-relaxed resize-none focus:outline-none focus:ring-4 focus:ring-accent-yellow transition-all placeholder:text-muted"
           aria-label="Your explanation"
         />
 

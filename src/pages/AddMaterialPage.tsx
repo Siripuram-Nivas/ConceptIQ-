@@ -79,7 +79,7 @@ export function AddMaterialPage() {
             <div className="space-y-12">
               {/* UPLOAD BLOCK */}
               <section>
-                <div className="editorial-card p-6 lg:p-10 border-4 border-fg bg-surface relative overflow-hidden group">
+                <div className="editorial-card p-6 lg:p-10 glass-panel relative overflow-hidden group">
                   <div className="absolute top-0 right-0 w-32 h-32 bg-accent-yellow rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
                   <label className="relative block cursor-pointer">
                     <input
@@ -117,7 +117,7 @@ export function AddMaterialPage() {
                     onChange={(e) => setPastedText(e.target.value)}
                     disabled={isLoading}
                     placeholder="Paste your study notes, article text, or lecture transcript here..."
-                    className="w-full h-48 px-6 py-4 border-2 border-fg bg-surface text-fg text-lg font-medium resize-none focus:outline-none focus:ring-4 focus:ring-fg transition-all shadow-[inset_0_2px_4px_rgba(0,0,0,0.1)] mb-6"
+                    className="w-full h-48 px-6 py-4 glass-panel text-fg text-lg font-medium resize-none focus:outline-none focus:ring-4 focus:ring-fg transition-all shadow-[inset_0_2px_4px_rgba(0,0,0,0.1)] mb-6"
                   />
                   <button
                     onClick={handlePaste}

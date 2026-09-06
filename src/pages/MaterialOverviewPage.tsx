@@ -106,7 +106,7 @@ export function MaterialOverviewPage() {
               <button
                 key={concept.name}
                 onClick={() => setSelectedConcept(selectedConcept === concept.name ? null : concept.name)}
-                className={`px-4 py-2 border-2 border-fg font-bold text-sm transition-all hover:-translate-y-0.5 hover:shadow-editorial ${selectedConcept === concept.name
+                className={`px-4 py-2 border-2 border-fg font-bold text-sm transition-all hover:-translate-y-0.5 hover:shadow-glass ${selectedConcept === concept.name
                     ? 'bg-accent-blue text-bg border-accent-blue'
                     : 'bg-surface text-fg'
                   }`}
@@ -118,7 +118,7 @@ export function MaterialOverviewPage() {
 
           {/* Detailed View for Selected Concept */}
           {selectedConcept && (
-            <div className="mt-8 p-6 lg:p-8 border-4 border-fg bg-accent-pink shadow-editorial">
+            <div className="mt-8 p-6 lg:p-8 border-4 border-fg bg-accent-pink shadow-glass">
               {processedContent.concepts
                 .filter((c) => c.name === selectedConcept)
                 .map((concept) => (
@@ -167,7 +167,7 @@ export function MaterialOverviewPage() {
         {processedContent.sourceReferences.length > 0 && (
           <div className="mb-16">
             <h2 className="font-display text-3xl font-bold uppercase tracking-tight mb-6">Source References</h2>
-            <div className="space-y-4 border-t-2 border-fg pt-8">
+            <div className="space-y-4 border-t border-border pt-8">
               {processedContent.sourceReferences.map((ref) => (
                 <div key={ref.id} className="flex gap-4">
                   <BookOpen size={24} className="text-accent-purple flex-shrink-0" />

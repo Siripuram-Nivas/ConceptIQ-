@@ -54,48 +54,50 @@ export function DemoPage() {
         </div>
 
         <div className="flex-1 space-y-6">
-          <div className="p-5 rounded-2xl border border-border bg-surface">
-            <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-1">Hero Demo</p>
-            <h2 className="font-display font-bold text-display-md text-fg">TCP Three-Way Handshake</h2>
-            <p className="text-sm text-muted mt-1">The complete misconception detection journey.</p>
+          <div className="glass-panel p-6">
+            <p className="text-xs font-bold text-accent-purple uppercase tracking-widest mb-2">Hero Demo</p>
+            <h2 className="font-display font-black text-3xl text-fg uppercase tracking-tighter mb-2">TCP Three-Way Handshake</h2>
+            <p className="text-base font-medium text-fg/80">The complete misconception detection journey.</p>
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted uppercase tracking-wide">Demo journey</p>
-            {DEMO_STAGES.map((stage, i) => (
-              <div
-                key={i}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm ${
-                  i < currentStage
-                    ? 'border-success/30 bg-success-light/30 text-success'
-                    : i === currentStage
-                    ? 'border-ai/40 bg-ai-light text-ai font-medium'
-                    : 'border-border text-muted'
-                }`}
-              >
-                <span className={`w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold ${
-                  i < currentStage ? 'bg-success text-white' :
-                  i === currentStage ? 'bg-ai text-white' :
-                  'bg-border text-muted'
-                }`}>{i < currentStage ? '✓' : i + 1}</span>
-                {stage.label}
-              </div>
-            ))}
+            <p className="text-xs font-bold text-muted uppercase tracking-widest mb-4">Demo journey</p>
+            <div className="glass-panel divide-y-4 divide-fg">
+              {DEMO_STAGES.map((stage, i) => (
+                <div
+                  key={i}
+                  className={`flex items-center gap-4 px-6 py-4 ${
+                    i < currentStage
+                      ? 'bg-success/20 text-success'
+                      : i === currentStage
+                      ? 'bg-accent-yellow text-fg'
+                      : 'text-muted'
+                  }`}
+                >
+                  <span className={`w-8 h-8 flex-shrink-0 flex items-center justify-center text-sm font-bold border-2 border-fg ${
+                    i < currentStage ? 'bg-success text-bg' :
+                    i === currentStage ? 'bg-fg text-bg' :
+                    'bg-surface text-muted border-muted'
+                  }`}>{i < currentStage ? '✓' : i + 1}</span>
+                  <span className="font-bold uppercase tracking-wide text-sm">{stage.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="space-y-3 mt-8">
+        <div className="space-y-4 mt-12">
           <button
             onClick={handleStart}
-            className="flex items-center justify-center gap-2 w-full min-h-[60px] rounded-2xl bg-fg text-bg font-bold text-base hover:bg-fg/90 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ai"
+            className="editorial-btn-primary w-full flex items-center justify-center gap-3 text-xl"
           >
-            <Zap size={18} className="text-accent" /> Start Demo
+            <Zap size={24} className="text-accent-yellow" /> START DEMO
           </button>
           <button
             onClick={handleReset}
-            className="flex items-center justify-center gap-2 w-full min-h-[52px] rounded-2xl border border-border text-fg font-semibold text-sm hover:bg-surface transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ai"
+            className="editorial-btn-outline w-full flex items-center justify-center gap-3 text-lg"
           >
-            <RotateCcw size={16} /> Reset Demo
+            <RotateCcw size={20} /> RESET DEMO
           </button>
         </div>
 

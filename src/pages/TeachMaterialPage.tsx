@@ -89,11 +89,11 @@ export function TeachMaterialPage() {
         </div>
 
         {concepts.length > 0 && (
-          <div className="pt-8 border-t-2 border-fg">
+          <div className="pt-8 border-t border-border">
             <p className="text-xs font-bold text-muted uppercase tracking-wider mb-4">Related Concepts to Mention</p>
             <div className="flex flex-wrap gap-2">
               {concepts.slice(0, 5).map((c) => (
-                <span key={c.name} className="px-3 py-1.5 border-2 border-fg bg-surface text-fg font-bold text-xs uppercase transition-all hover:bg-fg hover:text-bg">
+                <span key={c.name} className="px-3 py-1.5 glass-panel text-fg font-bold text-xs uppercase transition-all hover:bg-fg hover:text-bg">
                   {c.name}
                 </span>
               ))}

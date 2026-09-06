@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, BookOpen, ChevronRight } from 'lucide-react';
+import { ArrowLeft, BookOpen, ChevronRight } from 'lucide-react';
 import { useStudySpaceStore } from '../store/study-space-store';
 import { DemoModeIndicator } from '../components/DemoModeIndicator';
 
@@ -47,8 +47,8 @@ export function StudySpaceDetailPage() {
     currentSpace.progress.conceptsWeak;
 
   return (
-    <div className="min-h-screen bg-bg">
-      <div className="max-w-lg mx-auto px-5 pt-6 pb-32">
+    <div className="w-full flex-1 flex flex-col">
+      <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20 pt-8 pb-32 w-full">
         <button
           onClick={() => navigate('/study-spaces')}
           className="flex items-center gap-2 text-sm text-muted hover:text-fg transition-colors mb-8 min-h-[44px] -ml-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ai"
@@ -57,121 +57,132 @@ export function StudySpaceDetailPage() {
         </button>
 
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="font-display font-bold text-display-lg text-fg mb-2">{currentSpace.title}</h1>
+        <div className="mb-16 border-b border-white/[0.05] pb-10">
+          <h1 className="font-display font-black text-[3.5rem] md:text-[5rem] lg:text-[6rem] leading-[0.85] uppercase tracking-tighter text-white mb-6">{currentSpace.title}</h1>
           {currentSpace.description && (
-            <p className="text-muted leading-relaxed mb-3">{currentSpace.description}</p>
+            <p className="text-xl font-bold uppercase tracking-wide text-white/60 mb-8 max-w-3xl">{currentSpace.description}</p>
           )}
 
           {/* Progress Stats */}
-          <div className="flex gap-4 mt-4 flex-wrap">
-            <div className="px-3 py-1.5 rounded-full bg-success-light/30 border border-success/30">
-              <span className="text-xs font-semibold text-success">{currentSpace.progress.conceptsMastered} Mastered</span>
+          <div className="flex gap-4 flex-wrap">
+            <div className="px-4 py-2 border-2 border-success text-success font-bold text-sm uppercase tracking-wider">
+              {currentSpace.progress.conceptsMastered} Mastered
             </div>
-            <div className="px-3 py-1.5 rounded-full bg-accent/10 border border-accent/30">
-              <span className="text-xs font-semibold text-accent/80">{currentSpace.progress.conceptsPartial} Partial</span>
+            <div className="px-4 py-2 border-2 border-accent-purple text-accent-purple font-bold text-sm uppercase tracking-wider">
+              {currentSpace.progress.conceptsPartial} Partial
             </div>
             {currentSpace.progress.conceptsWeak > 0 && (
-              <div className="px-3 py-1.5 rounded-full bg-warning-light/30 border border-warning/30">
-                <span className="text-xs font-semibold text-warning/80">{currentSpace.progress.conceptsWeak} Weak</span>
+              <div className="px-4 py-2 bg-accent-yellow border-2 border-fg text-fg font-bold text-sm uppercase tracking-wider">
+                {currentSpace.progress.conceptsWeak} Weak
               </div>
             )}
           </div>
         </div>
 
-        {/* Materials Section */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-semibold text-muted uppercase tracking-wide">Materials ({spaceMaterials.length})</p>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-16">
+          {/* Main Content (Left) */}
+          <div className="lg:col-span-8 flex flex-col gap-16">
+            
+            {/* Materials Section */}
+            <div>
+              <div className="flex items-center justify-between border-b border-white/[0.05] pb-4 mb-8">
+                <h2 className="font-display text-3xl font-black uppercase tracking-tighter text-white">Materials <span className="text-white/40">({spaceMaterials.length})</span></h2>
             <button
               onClick={() => navigate(`/add-material-to-space/${currentSpace.id}`)}
-              className="text-xs text-ai hover:text-ai/80 transition-colors flex items-center gap-1"
+              className="text-sm font-bold uppercase tracking-wide text-accent-purple hover:underline"
             >
-              <Plus size={14} /> Add Material
+              + ADD MATERIAL
             </button>
           </div>
 
-          {spaceMaterials.length > 0 ? (
-            <div className="space-y-2">
-              {spaceMaterials.map((material) => (
-                <div
-                  key={material.id}
-                  className="p-4 rounded-xl border border-border bg-surface hover:bg-surface-hover transition-colors cursor-pointer"
-                  onClick={() => navigate(`/material-overview/${material.id}`)}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1">
-                      <p className="font-semibold text-sm text-fg">{material.title}</p>
-                      <p className="text-xs text-muted mt-1">
-                        {material.processingStatus === 'processing' && 'Processing...'}
-                        {material.processingStatus === 'ready' &&
-                          material.processedContent &&
-                          `${material.processedContent.concepts.length} concepts`}
-                        {material.processingStatus === 'failed' && 'Processing failed'}
-                      </p>
-                      {material.isDemoMode && <DemoModeIndicator />}
+              {spaceMaterials.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {spaceMaterials.map((material) => (
+                    <div
+                      key={material.id}
+                      className="group p-6 rounded-[16px] bg-white/[0.02] border border-white/[0.08] hover:border-accent-yellow/50 flex flex-col justify-between h-[180px] cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:bg-white/[0.04]"
+                      onClick={() => navigate(`/material-overview/${material.id}`)}
+                    >
+                      <div>
+                        <p className="font-display font-black text-2xl uppercase tracking-tighter text-white mb-2 line-clamp-2 group-hover:text-accent-yellow transition-colors">{material.title}</p>
+                        {material.isDemoMode && <DemoModeIndicator />}
+                      </div>
+                      
+                      <div className="flex items-end justify-between mt-auto pt-4 border-t border-white/[0.05]">
+                        <p className="text-xs font-bold uppercase tracking-widest text-white/50">
+                          {material.processingStatus === 'processing' && 'PROCESSING...'}
+                          {material.processingStatus === 'ready' &&
+                            material.processedContent &&
+                            `${material.processedContent.concepts.length} CONCEPTS`}
+                          {material.processingStatus === 'failed' && 'PROCESSING FAILED'}
+                        </p>
+                        <ChevronRight size={20} className="text-accent-yellow opacity-0 group-hover:opacity-100 transition-opacity translate-x-2 group-hover:translate-x-0" />
+                      </div>
                     </div>
-                    <ChevronRight size={16} className="text-muted flex-shrink-0 mt-1" />
+                  ))}
+                </div>
+              ) : (
+                <div className="border border-dashed border-white/[0.1] rounded-[16px] p-16 flex flex-col items-center text-center bg-white/[0.01]">
+                  <p className="text-lg font-bold text-white/50 uppercase tracking-wide mb-4">No materials added yet.</p>
+                  <button
+                    onClick={() => navigate(`/add-material-to-space/${currentSpace.id}`)}
+                    className="editorial-btn-primary mx-auto"
+                  >
+                    ADD MATERIAL
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Sidebar (Right) */}
+          <div className="lg:col-span-4 flex flex-col gap-8">
+            
+            {/* Action Sidebar */}
+            <div className="sticky top-24 flex flex-col gap-8">
+              
+              {/* Continue Learning */}
+              {spaceMaterials.some((m) => m.processedContent) && (
+                <div className="p-8 rounded-[16px] bg-white/[0.02] border border-white/[0.08]">
+                  <p className="text-xs font-bold text-accent-yellow uppercase tracking-widest mb-4">Continue Learning</p>
+                  <h3 className="font-display font-black text-2xl uppercase tracking-tighter text-white mb-6">Ready to teach?</h3>
+                  <button
+                    onClick={() => {
+                      // Start teaching on first available concept
+                      const firstMaterial = spaceMaterials.find((m) => m.processedContent);
+                      if (firstMaterial?.processedContent?.concepts[0]) {
+                        const concept = firstMaterial.processedContent.concepts[0];
+                        navigate(`/teach-material/${firstMaterial.id}?concept=${encodeURIComponent(concept.name)}`);
+                      }
+                    }}
+                    className="editorial-btn-primary w-full text-lg flex justify-between items-center group"
+                  >
+                    START TEACHBACK
+                    <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
+                  </button>
+                </div>
+              )}
+
+              {/* Knowledge Map Section */}
+              {map && map.nodes.length > 0 && (
+                <div className="p-8 rounded-[16px] bg-white/[0.02] border border-white/[0.08] flex flex-col items-center text-center">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-[12px] bg-white/[0.05] border border-white/[0.1] text-accent-yellow mb-6">
+                    <BookOpen size={24} />
                   </div>
+                  <p className="font-display font-black text-4xl text-white uppercase tracking-tighter mb-2">{totalConcepts}</p>
+                  <p className="text-sm font-bold text-white/50 uppercase tracking-widest mb-8">Concepts in map</p>
+                  <button
+                    onClick={() => navigate(`/knowledge-map/${currentSpace.id}`)}
+                    className="editorial-btn-accent w-full"
+                  >
+                    VIEW KNOWLEDGE MAP
+                  </button>
                 </div>
-              ))}
+              )}
             </div>
-          ) : (
-            <div className="p-4 rounded-xl border border-border bg-surface/50 text-center py-8">
-              <p className="text-sm text-muted mb-3">No materials added yet</p>
-              <button
-                onClick={() => navigate(`/add-material-to-space/${currentSpace.id}`)}
-                className="text-sm text-ai hover:text-ai/80 transition-colors"
-              >
-                + Add Material
-              </button>
-            </div>
-          )}
+
+          </div>
         </div>
-
-        {/* Knowledge Map Section */}
-        {map && map.nodes.length > 0 && (
-          <div className="mb-8">
-            <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">
-              Knowledge Map · {map.sourceCount} source{map.sourceCount !== 1 ? 's' : ''}
-            </p>
-            <div className="p-5 rounded-2xl border border-border bg-surface space-y-3">
-              <div className="text-center py-8">
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-ai/10 mb-3">
-                  <BookOpen size={20} className="text-ai" />
-                </div>
-                <p className="font-semibold text-fg mb-1">{totalConcepts} Concepts</p>
-                <p className="text-xs text-muted mb-4">Organized into your knowledge map</p>
-                <button
-                  onClick={() => navigate(`/knowledge-map/${currentSpace.id}`)}
-                  className="text-sm text-ai hover:text-ai/80 transition-colors"
-                >
-                  View Map →
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Continue Learning Section */}
-        {spaceMaterials.some((m) => m.processedContent) && (
-          <div>
-            <p className="text-xs font-semibold text-muted uppercase tracking-wide mb-3">Continue Learning</p>
-            <button
-              onClick={() => {
-                // Start teaching on first available concept
-                const firstMaterial = spaceMaterials.find((m) => m.processedContent);
-                if (firstMaterial?.processedContent?.concepts[0]) {
-                  const concept = firstMaterial.processedContent.concepts[0];
-                  navigate(`/teach-material/${firstMaterial.id}?concept=${encodeURIComponent(concept.name)}`);
-                }
-              }}
-              className="w-full min-h-[52px] px-6 rounded-2xl bg-ai text-bg font-semibold text-sm hover:bg-ai/90 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ai"
-            >
-              Start TeachBack →
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

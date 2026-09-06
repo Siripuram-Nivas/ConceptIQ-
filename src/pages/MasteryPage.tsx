@@ -296,7 +296,7 @@ export function MasteryPage() {
             >
               The Gap You Repaired
             </h2>
-            <div className="border-4 border-fg bg-surface p-8 lg:p-10">
+            <div className="glass-panel p-8 lg:p-10">
               <p className="text-xs font-bold uppercase tracking-wider text-muted mb-2">
                 Concept
               </p>
@@ -458,11 +458,11 @@ export function MasteryPage() {
             >
               What Changed
             </h2>
-            <div className="border-4 border-fg bg-surface">
+            <div className="glass-panel">
               {conceptDiffs.map((diff, i) => (
                 <div
                   key={diff.concept}
-                  className={`p-6 lg:p-8${i < conceptDiffs.length - 1 ? ' border-b-4 border-fg' : ''}`}
+                  className={`p-6 lg:p-8${i < conceptDiffs.length - 1 ? ' border-b border-border' : ''}`}
                 >
                   <p className="font-display text-lg font-bold uppercase tracking-tight mb-5">
                     {diff.concept}
@@ -535,7 +535,7 @@ export function MasteryPage() {
                 {hadRepair ? 'Demonstrated After Repair' : 'Demonstrated'}
               </span>
             </div>
-            <div className="border-4 border-fg bg-surface divide-y-4 divide-fg">
+            <div className="glass-panel divide-y-4 divide-fg">
               {finalEvidence.map((ev) => (
                 <div key={ev.index} className="p-6 lg:p-8 flex gap-6 items-start">
                   <span
@@ -587,7 +587,7 @@ export function MasteryPage() {
           >
             Mastery Index
           </h2>
-          <div className="border-4 border-fg bg-surface p-8">
+          <div className="glass-panel p-8">
             <div
               className="flex items-baseline gap-6 mb-4"
               aria-label={`Mastery changed from ${masteryBefore} to ${masteryAfter}`}
@@ -613,7 +613,7 @@ export function MasteryPage() {
             {"What's Next?"}
           </h2>
           {unresolved.length > 0 ? (
-            <div className="border-4 border-fg bg-surface p-8">
+            <div className="glass-panel p-8">
               <p className="font-display text-xl font-bold uppercase tracking-tight text-fg mb-2">
                 {unresolved[0].concept}
               </p>
@@ -630,7 +630,7 @@ export function MasteryPage() {
               </button>
             </div>
           ) : (
-            <div className="border-4 border-fg bg-surface p-8">
+            <div className="glass-panel p-8">
               <p className="font-display text-xl font-bold uppercase tracking-tight text-fg mb-2">
                 All Concepts Addressed
               </p>

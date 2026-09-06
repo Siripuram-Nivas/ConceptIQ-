@@ -6,8 +6,19 @@
 @tailwind utilities;
 
 @layer base {
-  html {
+  :root {
+    --radius: 1rem;
+    --accent: oklch(0.89 0 0);
+    --destructive-foreground: oklch(0.985 0 0);
+  }
 
+  .dark {
+    --background: oklch(0.125 0 0);
+    --accent: oklch(0.229 0 0);
+    --destructive-foreground: oklch(0.985 0 0);
+  }
+  
+  html {
     font-feature-settings: 'cv11', 'ss01';
     background-color: theme('colors.bg');
     color: theme('colors.fg');
@@ -35,23 +46,52 @@
 }
 
 @layer components {
+  /* Glass Tokens */
+  .glass-panel {
+    @apply bg-surface border border-border rounded-[20px] shadow-glass backdrop-blur-[24px];
+  }
+
+  .glass-subtle {
+    @apply bg-surface border border-border/50 rounded-2xl shadow-glass backdrop-blur-[16px];
+  }
+
+  .glass-strong {
+    @apply bg-surface-strong border border-border-strong rounded-2xl shadow-glass backdrop-blur-[32px];
+  }
+
+  /* Components based on Tokens */
   .editorial-card {
-    @apply border-2 border-fg bg-surface shadow-editorial transition-all hover:shadow-editorial-hover hover:translate-x-1 hover:translate-y-1;
+    @apply glass-panel transition-all hover:bg-surface-light hover:-translate-y-1 hover:shadow-lg;
   }
   
   .editorial-btn {
-    @apply flex items-center justify-center font-bold px-6 py-4 border-2 border-fg shadow-editorial transition-all hover:shadow-editorial-hover hover:translate-x-1 hover:translate-y-1 active:translate-x-1.5 active:translate-y-1.5 active:shadow-none disabled:opacity-50 disabled:pointer-events-none;
+    @apply flex items-center justify-center font-bold px-6 py-4 rounded-[20px] transition-all disabled:opacity-50 disabled:pointer-events-none;
   }
 
   .editorial-btn-primary {
-    @apply editorial-btn bg-fg text-bg;
+    @apply editorial-btn bg-fg text-bg hover:bg-fg/90 shadow-glass hover:-translate-y-1;
   }
 
   .editorial-btn-accent {
-    @apply editorial-btn bg-accent-yellow text-fg;
+    @apply editorial-btn bg-accent-yellow text-bg hover:opacity-90 shadow-glass hover:-translate-y-1;
   }
 
   .editorial-btn-outline {
-    @apply editorial-btn bg-surface text-fg;
+    @apply editorial-btn glass-strong text-fg hover:bg-surface-light;
+  }
+
+  /* Atmospheric Background wrapper */
+  .atmospheric-bg {
+    @apply fixed inset-0 z-[-1] overflow-hidden pointer-events-none bg-bg;
+  }
+
+  .atmospheric-glow-purple {
+    @apply absolute top-[-10%] left-[-10%] w-[60vw] h-[60vw] rounded-full mix-blend-screen opacity-20 blur-[120px];
+    background: radial-gradient(circle, theme('colors.accent.purple') 0%, transparent 70%);
+  }
+
+  .atmospheric-glow-blue {
+    @apply absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full mix-blend-screen opacity-15 blur-[100px];
+    background: radial-gradient(circle, theme('colors.accent.blue') 0%, transparent 70%);
   }
 }

@@ -21,8 +21,8 @@ export function RepairSession({ repair, onComplete }: Props) {
   };
 
   return (
-    <div className="space-y-8 animate-fade-in border-4 border-fg bg-surface p-6 lg:p-10 shadow-editorial">
-      <div className="flex items-center justify-between border-b-4 border-fg pb-6">
+    <div className="space-y-8 animate-fade-in glass-panel p-6 lg:p-10 shadow-glass">
+      <div className="flex items-center justify-between border-b border-border pb-6">
         <div className="flex gap-2">
           {repair.visualSteps.map((_, i) => (
             <div

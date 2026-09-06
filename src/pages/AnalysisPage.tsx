@@ -85,7 +85,7 @@ export function AnalysisPage() {
           <div className="space-y-16 animate-slide-up">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="editorial-card p-6 lg:p-8 bg-surface border-4">
-                <h2 className="font-display text-2xl font-bold uppercase tracking-tight mb-6 pb-4 border-b-2 border-fg/20">What You Demonstrated</h2>
+                <h2 className="font-display text-2xl font-bold uppercase tracking-tight mb-6 pb-4 border-b border-border/20">What You Demonstrated</h2>
                 <ul className="space-y-4">
                   {analysis.concepts.filter(c => c.status === 'mastered' || c.status === 'strong' || c.status === 'partial').map((concept, i) => (
                     <li key={i} className="flex gap-3 text-lg font-medium text-fg">
@@ -100,7 +100,7 @@ export function AnalysisPage() {
               </div>
 
               <div className="editorial-card p-6 lg:p-8 bg-surface border-4">
-                <h2 className="font-display text-2xl font-bold uppercase tracking-tight mb-6 pb-4 border-b-2 border-fg/20">What's Missing</h2>
+                <h2 className="font-display text-2xl font-bold uppercase tracking-tight mb-6 pb-4 border-b border-border/20">What's Missing</h2>
                 <ul className="space-y-4">
                   {analysis.concepts.filter(c => c.status === 'weak' || c.status === 'not_started').map((concept, i) => (
                     <li key={i} className="flex gap-3 text-lg font-medium text-fg">
@@ -116,7 +116,7 @@ export function AnalysisPage() {
             </div>
 
             {hasMisconception && misconception && misconceptEvidence && (
-              <div className="border-4 border-fg bg-accent-purple p-8 lg:p-12 shadow-editorial">
+              <div className="border-4 border-fg bg-accent-purple p-8 lg:p-12 shadow-glass">
                 <h2 className="font-display text-4xl font-bold uppercase tracking-tight text-bg mb-4">Potential Misconception</h2>
                 <div className="bg-bg p-6 border-2 border-fg mb-8">
                   <h3 className="font-bold text-fg uppercase tracking-wider text-sm mb-2">What you might be misunderstanding</h3>
@@ -157,14 +157,14 @@ export function AnalysisPage() {
 
         {phase === 'challenge' && challenge && (
           <div className="space-y-12 animate-slide-up">
-            <div className="border-4 border-fg p-8 bg-accent-pink shadow-editorial">
+            <div className="border-4 border-fg p-8 bg-accent-pink shadow-glass">
               <h2 className="font-display text-3xl font-bold text-fg mb-6">{challenge.question}</h2>
               <textarea
                 value={followUpText}
                 onChange={(e) => setFollowUpText(e.target.value)}
                 placeholder="Type your answer..."
                 rows={6}
-                className="w-full px-6 py-6 border-2 border-fg bg-surface text-fg text-xl font-medium resize-none focus:outline-none focus:ring-4 focus:ring-fg transition-all"
+                className="w-full px-6 py-6 glass-panel text-fg text-xl font-medium resize-none focus:outline-none focus:ring-4 focus:ring-fg transition-all"
               />
             </div>
 
@@ -180,7 +180,7 @@ export function AnalysisPage() {
 
         {phase === 'confidence' && (
           <div className="space-y-12 animate-slide-up">
-            <div className="border-4 border-fg p-8 bg-surface shadow-editorial">
+            <div className="border-4 border-fg p-8 bg-surface shadow-glass">
               <h2 className="font-display text-3xl font-bold text-fg mb-8 text-center">How confident are you in this answer?</h2>
               <div className="flex justify-between gap-4 max-w-2xl mx-auto">
                 {[1, 2, 3, 4, 5].map((level) => (

@@ -47,15 +47,15 @@ export function EvidencePanel({ concepts, showMissing = true }: Props) {
 
 function ConceptStatusBadge({ status }: { status: ConceptStatus }) {
   const map: Record<ConceptStatus, { label: string; cls: string }> = {
-    mastered: { label: 'Mastered', cls: 'bg-success-light text-success' },
-    strong: { label: 'Strong', cls: 'bg-success-light text-success' },
-    partial: { label: 'Partial', cls: 'bg-accent/20 text-fg/70' },
-    weak: { label: 'Weak', cls: 'bg-warning-light text-warning' },
-    potential_misconception: { label: 'Potential misconception', cls: 'bg-warning-light text-warning' },
-    not_started: { label: 'Not covered', cls: 'bg-surface text-muted' },
+    mastered: { label: 'Mastered', cls: 'bg-success text-bg border-2 border-success' },
+    strong: { label: 'Strong', cls: 'bg-success text-bg border-2 border-success' },
+    partial: { label: 'Partial', cls: 'bg-surface text-fg border-2 border-fg' },
+    weak: { label: 'Weak', cls: 'bg-accent-yellow text-fg border-2 border-fg' },
+    potential_misconception: { label: 'Uncertain', cls: 'bg-accent-pink text-fg border-2 border-fg' },
+    not_started: { label: 'Not covered', cls: 'bg-surface text-muted border-2 border-muted' },
   };
   const { label, cls } = map[status];
   return (
-    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${cls}`}>{label}</span>
+    <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 ${cls}`}>{label}</span>
   );
 }

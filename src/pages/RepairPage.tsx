@@ -62,13 +62,13 @@ export function RepairPage() {
 
         {phase === 're-explain' && (
           <div className="space-y-8 animate-slide-up">
-            <div className="border-4 border-fg bg-accent-blue p-6 lg:p-8 shadow-editorial">
+            <div className="border-4 border-fg bg-accent-blue p-6 lg:p-8 shadow-glass">
               <p className="text-2xl font-bold text-bg leading-relaxed">
                 Now explain the full concept again, incorporating what you just learned.
               </p>
             </div>
 
-            <div className="border-4 border-fg p-6 bg-surface shadow-editorial">
+            <div className="border-4 border-fg p-6 bg-surface shadow-glass">
               <TeachBackRecorder
                 onSubmit={handleReExplain}
                 placeholder="Explain again, now including the missing connection..."

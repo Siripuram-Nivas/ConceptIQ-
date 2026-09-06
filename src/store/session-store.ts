@@ -91,7 +91,7 @@ export const useSessionStore = create<SessionStore>()(
               ? { ...s.session, analysis, challenge, state: 'ANALYSIS' }
               : null,
           }));
-          if (analysis.recommendedAction === 'mastered' || analysis.overallStatus === 'mastered') {
+          if (!session.isDemoMode && (analysis.recommendedAction === 'mastered' || analysis.overallStatus === 'mastered')) {
             useStudySpaceStore.getState().syncSessionToMap(session.topicId, analysis);
           }
         } catch {
@@ -104,7 +104,7 @@ export const useSessionStore = create<SessionStore>()(
             session: s.session ? { ...s.session, analysis, challenge, state: 'ANALYSIS' } : null,
             isDemo: true,
           }));
-          if (analysis.recommendedAction === 'mastered' || analysis.overallStatus === 'mastered') {
+          if (!session.isDemoMode && (analysis.recommendedAction === 'mastered' || analysis.overallStatus === 'mastered')) {
             useStudySpaceStore.getState().syncSessionToMap(session.topicId, analysis);
           }
         }
@@ -140,7 +140,9 @@ export const useSessionStore = create<SessionStore>()(
           set((s) => ({
             session: s.session ? { ...s.session, finalAnalysis, state: 'MASTERY' } : null,
           }));
-          useStudySpaceStore.getState().syncSessionToMap(session.topicId, finalAnalysis);
+          if (!session.isDemoMode) {
+            useStudySpaceStore.getState().syncSessionToMap(session.topicId, finalAnalysis);
+          }
         } catch {
           const demo = new DemoProvider();
           const finalAnalysis = await demo.evaluateReExplanation(session, text);
@@ -148,7 +150,9 @@ export const useSessionStore = create<SessionStore>()(
             session: s.session ? { ...s.session, finalAnalysis, state: 'MASTERY' } : null,
             isDemo: true,
           }));
-          useStudySpaceStore.getState().syncSessionToMap(session.topicId, finalAnalysis);
+          if (!session.isDemoMode) {
+            useStudySpaceStore.getState().syncSessionToMap(session.topicId, finalAnalysis);
+          }
         }
       },
 
