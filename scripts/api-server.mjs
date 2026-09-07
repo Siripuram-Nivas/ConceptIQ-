@@ -78,10 +78,10 @@ async function main() {
       const mockReq = { method: 'POST', body: parsedBody };
       const mockRes = {
         _status: 200,
-        _headers: {} as Record<string, string>,
-        setHeader(k: string, v: string) { this._headers[k] = v; res.setHeader(k, v); },
-        status(code: number) { this._status = code; return this; },
-        json(data: any) { res.writeHead(this._status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); return this; },
+        _headers: {},
+        setHeader(k, v) { this._headers[k] = v; res.setHeader(k, v); },
+        status(code) { this._status = code; return this; },
+        json(data) { res.writeHead(this._status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); return this; },
         end() { res.end(); return this; },
       };
       await handler(mockReq, mockRes);
