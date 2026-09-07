@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import type { StudySpace, UploadedMaterial, KnowledgeMap, KnowledgeMapNode, ConceptStatus, Activity } from '../types';
 import { createMaterialProcessor } from '../ai/material-processor';
 import { idbStorage } from '../lib/idb-storage';
+import { parsePptx, slidesToCanonicalText } from '../lib/pptx-parser';
 
 interface StudySpaceStore {
   // Study Spaces
@@ -123,6 +124,8 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
         const materialId = crypto.randomUUID();
         const title = file?.name.replace(/\.[^/.]+$/, '') || 'Pasted Content';
 
+        const isPptx = !!(file && file.name.toLowerCase().endsWith('.pptx'));
+
         // Create material with processing state
         const newMaterial: UploadedMaterial = {
           id: materialId,
@@ -130,7 +133,7 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
           title,
           originalFileName: file?.name,
           uploadedAt: new Date(),
-          type: file ? (file.name.endsWith('.pdf') ? 'pdf' : 'txt') : 'pasted_text',
+          type: isPptx ? 'pptx' : file ? (file.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'txt') : 'pasted_text',
           rawContent: text,
           processingStatus: 'processing',
           isDemoMode: true,
@@ -144,12 +147,55 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
           ),
         }));
 
-
-
         // Process material
         try {
+          let contentToProcess = text;
+          let slideCount: number | undefined;
+          let pptxWarnings: string[] | undefined;
+
+          if (isPptx && file) {
+            // ── PPTX BRANCH ──────────────────────────────────────────
+            const parseResult = await parsePptx(file);
+            slideCount = parseResult.totalSlides;
+            pptxWarnings = parseResult.warnings.length > 0 ? parseResult.warnings : undefined;
+
+            // Convert slides to canonical text for the existing processor
+            contentToProcess = slidesToCanonicalText(parseResult.slides);
+
+            // Store slideCount on material immediately so UI can show it
+            set((state) => ({
+              materials: state.materials.map((m) =>
+                m.id === materialId ? { ...m, slideCount, pptxWarnings } : m
+              ),
+            }));
+          }
+
           const processor = createMaterialProcessor();
-          const processed = await processor.processText(text, file?.name);
+          const processed = await processor.processText(contentToProcess, file?.name);
+
+          // For PPTX, update source references to say "Slide N" not "Page N"
+          if (isPptx) {
+            processed.sections = processed.sections.map((section, idx) => ({
+              ...section,
+              pageNumber: undefined,
+              // Encode slide number in section id for downstream use
+              id: section.id.startsWith('slide-') ? section.id : `slide-${idx + 1}`,
+            }));
+            processed.sourceReferences = processed.sourceReferences.map((ref, idx) => ({
+              ...ref,
+              location: `Slide ${idx + 1}`,
+            }));
+            // Patch concept sourceReferences to say Slide N
+            processed.concepts = processed.concepts.map((concept) => ({
+              ...concept,
+              sourceReference: concept.sourceReference
+                ? concept.sourceReference.replace(/Page (\d+)/i, 'Slide $1').replace(/Section \d+/i, (m) => {
+                    const num = m.match(/\d+/)?.[0];
+                    return num ? `Slide ${num}` : m;
+                  })
+                : undefined,
+            }));
+          }
 
           set((state) => ({
             materials: state.materials.map((m) =>
@@ -158,6 +204,7 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
                   ...m,
                   processingStatus: 'ready',
                   processedContent: processed,
+                  rawContent: contentToProcess,
                 }
                 : m
             ),
@@ -167,21 +214,25 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
           get().mergeConceptsToMap(spaceId, processed.concepts);
 
           // Record activity
+          const materialDesc = isPptx && slideCount !== undefined
+            ? `Added "${title}" (${slideCount} slides) and extracted ${processed.concepts.length} concepts.`
+            : `Added "${title}" and extracted ${processed.concepts.length} concepts.`;
+
           get().addActivity(spaceId, {
             type: 'material_added',
             title: 'Material Added',
-            description: `Added "${title}" and extracted ${processed.concepts.length} concepts.`,
+            description: materialDesc,
             materialId: materialId,
           });
 
         } catch (error) {
           console.error('Material processing failed:', error);
+          const errMsg = error instanceof Error ? error.message : 'Processing failed';
           set((state) => ({
             materials: state.materials.map((m) =>
-              m.id === materialId ? { ...m, processingStatus: 'failed' } : m
+              m.id === materialId ? { ...m, processingStatus: 'failed', pptxWarnings: [errMsg] } : m
             ),
           }));
-
         }
       },
 

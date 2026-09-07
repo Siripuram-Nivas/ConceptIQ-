@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, BookOpen, Zap } from 'lucide-react';
+import { ArrowLeft, BookOpen, Zap, Presentation, AlertTriangle } from 'lucide-react';
 import { useStudySpaceStore } from '../store/study-space-store';
 import { useSessionStore } from '../store/session-store';
 import { DemoModeIndicator } from '../components/DemoModeIndicator';
@@ -85,11 +85,44 @@ export function MaterialOverviewPage() {
           </div>
         )}
 
-        {/* Title & Summary */}
+        {/* Title, badge & Summary */}
         <div className="mb-16">
+          {/* Format badge */}
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            {currentMaterial.type === 'pptx' && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-accent-yellow/20 border border-accent-yellow/40 rounded text-xs font-bold text-accent-yellow uppercase tracking-wide">
+                <Presentation size={11} /> PowerPoint
+              </span>
+            )}
+            {currentMaterial.type === 'pptx' && currentMaterial.slideCount !== undefined && (
+              <span className="px-3 py-1 bg-surface rounded text-xs font-bold text-fg/70 uppercase tracking-wide">
+                {currentMaterial.slideCount} Slides
+              </span>
+            )}
+            <span className="px-3 py-1 bg-surface rounded text-xs font-bold text-fg/70 uppercase tracking-wide">
+              {processedContent.concepts.length} Concepts
+            </span>
+          </div>
+
           <h1 className="font-display text-display-lg text-fg leading-none mb-8">
             {processedContent.title}
           </h1>
+
+          {/* PPTX warnings */}
+          {currentMaterial.type === 'pptx' && currentMaterial.pptxWarnings && currentMaterial.pptxWarnings.length > 0 && (
+            <div className="mb-6 p-4 bg-accent-yellow/10 border border-accent-yellow/30 rounded flex gap-3">
+              <AlertTriangle size={16} className="text-accent-yellow flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-bold text-accent-yellow uppercase tracking-wide mb-1">Processing Notes</p>
+                <ul className="space-y-1">
+                  {currentMaterial.pptxWarnings.map((w, i) => (
+                    <li key={i} className="text-xs text-fg/70 font-medium">{w}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
           <div className="border-l-4 border-fg pl-6 py-2">
             <h2 className="text-sm font-bold uppercase tracking-wider text-muted mb-2">Summary</h2>
             <p className="text-xl font-medium text-fg/80 leading-relaxed max-w-3xl">
@@ -166,11 +199,16 @@ export function MaterialOverviewPage() {
         {/* Source References */}
         {processedContent.sourceReferences.length > 0 && (
           <div className="mb-16">
-            <h2 className="font-display text-3xl font-bold uppercase tracking-tight mb-6">Source References</h2>
+            <h2 className="font-display text-3xl font-bold uppercase tracking-tight mb-6">
+              {currentMaterial.type === 'pptx' ? 'Slide Sources' : 'Source References'}
+            </h2>
             <div className="space-y-4 border-t border-border pt-8">
               {processedContent.sourceReferences.map((ref) => (
                 <div key={ref.id} className="flex gap-4">
-                  <BookOpen size={24} className="text-accent-purple flex-shrink-0" />
+                  {currentMaterial.type === 'pptx'
+                    ? <Presentation size={24} className="text-accent-yellow flex-shrink-0" />
+                    : <BookOpen size={24} className="text-accent-purple flex-shrink-0" />
+                  }
                   <div>
                     <p className="font-bold text-fg mb-1">{ref.location}</p>
                     <p className="text-muted text-sm font-medium leading-relaxed max-w-2xl">{ref.content}</p>

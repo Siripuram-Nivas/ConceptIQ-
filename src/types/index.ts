@@ -184,12 +184,14 @@ export interface UploadedMaterial {
   title: string;
   originalFileName?: string;
   uploadedAt: Date;
-  type: 'pdf' | 'txt' | 'pasted_text';
+  type: 'pdf' | 'txt' | 'pptx' | 'pasted_text';
   rawContent: string;
   processingStatus: MaterialStatus;
   isDemoMode: boolean;
   processedContent?: ProcessedMaterial;
   version: number;
+  slideCount?: number;       // populated for pptx
+  pptxWarnings?: string[];   // non-fatal parse warnings
 }
 
 export type ActivityType = 'material_added' | 'teachback_completed' | 'concept_repaired' | 'misconception_detected';
