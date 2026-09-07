@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { StudySpace, UploadedMaterial, KnowledgeMap, KnowledgeMapNode, ConceptStatus, Activity } from '../types';
 import { createMaterialProcessor } from '../ai/material-processor';
+import { isDemoMode } from '../ai';
 import { idbStorage } from '../lib/idb-storage';
 import { parsePptx, slidesToCanonicalText } from '../lib/pptx-parser';
 import { parsePdf } from '../lib/pdf-parser';
@@ -32,7 +33,7 @@ interface StudySpaceStore {
 
   getKnowledgeMapForSpace: (spaceId: string) => KnowledgeMap | null;
   updateMapNode: (spaceId: string, nodeId: string, updates: Partial<KnowledgeMapNode>) => void;
-  mergeConceptsToMap: (spaceId: string, concepts: any[]) => void;
+  mergeConceptsToMap: (spaceId: string, concepts: any[], edges?: Array<{ from: string; to: string; relationship: string }>) => void;
   syncSessionToMap: (materialId: string, analysis: any) => void;
 }
 
@@ -137,7 +138,7 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
           type: isPptx ? 'pptx' : file ? (file.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'txt') : 'pasted_text',
           rawContent: text,
           processingStatus: 'processing',
-          isDemoMode: true,
+          isDemoMode: isDemoMode(),
           version: 1,
         };
 
@@ -225,8 +226,9 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
             ),
           }));
 
-          // Merge concepts into space's knowledge map or create one
-          get().mergeConceptsToMap(spaceId, processed.concepts);
+          // Merge concepts + relationships into space's knowledge map (or create one)
+          const relationships = (processed as any).relationships ?? [];
+          get().mergeConceptsToMap(spaceId, processed.concepts, relationships);
 
           // Record activity
           const materialDesc = isPptx && slideCount !== undefined
@@ -290,7 +292,7 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
 
       },
 
-      mergeConceptsToMap(spaceId, concepts) {
+      mergeConceptsToMap(spaceId, concepts, edges = []) {
         let existingMap = get().knowledgeMaps.find((m) => m.studySpaceId === spaceId);
 
         if (!existingMap) {
@@ -313,18 +315,29 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
 
         // Convert concepts to map nodes
         const newNodes: KnowledgeMapNode[] = concepts.map((concept) => ({
-          id: concept.id || concept.name.toLowerCase().replace(/\s+/g, '-'),
+          id: concept.id || concept.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
           label: concept.name,
           status: 'not_started' as ConceptStatus,
           evidence: [],
           missingEvidence: [],
         }));
 
-        // Merge with existing nodes (avoid duplicates)
+        // Merge with existing nodes (avoid duplicates by id)
         const mergedNodes = [...existingMap.nodes];
         newNodes.forEach((newNode) => {
           if (!mergedNodes.find((n) => n.id === newNode.id)) {
             mergedNodes.push(newNode);
+          }
+        });
+
+        // Merge edges (avoid duplicates)
+        const mergedEdges = [...(existingMap.edges ?? [])];
+        edges.forEach((edge) => {
+          const fromId = edge.from.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+          const toId = edge.to.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+          const already = mergedEdges.find(e => e.from === fromId && e.to === toId);
+          if (!already) {
+            mergedEdges.push({ from: fromId, to: toId, relationship: edge.relationship });
           }
         });
 
@@ -335,6 +348,7 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
               ? {
                 ...m,
                 nodes: mergedNodes,
+                edges: mergedEdges,
                 version: m.version + 1,
                 updatedAt: new Date(),
                 sourceCount: (m.sourceCount || 0) + 1,

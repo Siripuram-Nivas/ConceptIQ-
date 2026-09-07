@@ -282,17 +282,6 @@ function AuthFormContainer({ isSignIn, onToggle }: { isSignIn: boolean; onToggle
           {isSignIn ? "Sign up" : "Sign in"}
         </Button>
       </div>
-      <div className="relative text-center text-sm after:absolute after:inset-0 after:top-1/2 after:z-0 after:flex after:items-center after:border-t after:border-border">
-        <span className="relative z-10 bg-background px-2 text-muted-foreground">Or continue with</span>
-      </div>
-      <Button variant="outline" type="button" onClick={() => console.log("UI: Google button clicked")}>
-        <img
-          src="https://cdn.21st.dev/assets/mirror/38/38146bfd9eff6dbf0d74771f2e625c70d87d3770e0d080dbb6e50db1d5403f46.svg"
-          alt="Google icon"
-          className="mr-2 h-4 w-4"
-        />
-        Continue with Google
-      </Button>
     </div>
   );
 }
@@ -351,7 +340,7 @@ export function AuthUI({ signInContent = {}, signUpContent = {}, initialView = "
         input[type="password"]::-ms-clear { display: none; }
       `}</style>
 
-      <div className="flex h-screen items-center justify-center p-6 md:h-auto md:p-0 md:py-12">
+      <div className="flex min-h-dvh items-center justify-center p-6 md:h-auto md:min-h-0 md:p-0 md:py-12">
         <AuthFormContainer isSignIn={isSignIn} onToggle={toggleForm} />
       </div>
 

@@ -63,9 +63,18 @@ export function MaterialOverviewPage() {
   }
 
   const handleStartTeachBack = (concept?: string) => {
-    // Create a virtual topic from the material + concept
     const topicId = currentMaterial.id;
-    startSession(topicId);
+    const conceptName = concept || processedContent?.concepts[0]?.name || currentMaterial.title;
+    // Pass a relevant excerpt of the material as context for the AI evaluator
+    // Prefer the section content for the selected concept, else the full summary + key terms
+    const relevantSection = processedContent?.sections?.find(s =>
+      s.title.toLowerCase().includes((concept ?? '').toLowerCase())
+    );
+    const materialContext = relevantSection
+      ? `${processedContent?.summary ?? ''}\n\n${relevantSection.title}:\n${relevantSection.content.slice(0, 3000)}`
+      : `${processedContent?.summary ?? ''}\n\n${processedContent?.keyTerms?.map(t => `${t.term}: ${t.definition}`).join('\n') ?? ''}`.slice(0, 4000);
+
+    startSession(topicId, conceptName, materialContext);
     navigate(`/teach-material/${currentMaterial.id}${concept ? `?concept=${encodeURIComponent(concept)}` : ''}`);
   };
 

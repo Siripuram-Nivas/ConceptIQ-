@@ -23,6 +23,7 @@ import { MaterialOverviewPage } from './pages/MaterialOverviewPage';
 import { TeachMaterialPage } from './pages/TeachMaterialPage';
 import { MyStudySpacesPage } from './pages/MyStudySpacesPage';
 import { StudySpaceDetailPage } from './pages/StudySpaceDetailPage';
+import { NotFoundPage } from './pages/NotFoundPage';
 
 // Convenience wrapper to reduce repetition
 function P({ children }: { children: ReactNode }) {
@@ -67,6 +68,7 @@ export default function App() {
           <Route path="/mastery"                        element={<P><MasteryPage /></P>} />
           <Route path="/map"                            element={<P><KnowledgeMapPage /></P>} />
           <Route path="/profile"                        element={<P><ProfilePage /></P>} />
+          <Route path="*"                               element={<NotFoundPage />} />
         </Routes>
       </AppShell>
     </BrowserRouter>

@@ -24,7 +24,7 @@ interface SessionStore {
   isDemo: boolean;
   error: string | null;
 
-  startSession: (topicId: string) => void;
+  startSession: (topicId: string, topic?: string, materialContext?: string) => void;
   updateExplanationDraft: (text: string) => void;
   submitExplanation: (text: string) => Promise<void>;
   submitFollowUp: (answer: string, confidence: number) => Promise<void>;
@@ -36,10 +36,12 @@ interface SessionStore {
   resetDemo: () => void;
 }
 
-function createNewSession(topicId: string): LearningSession {
+function createNewSession(topicId: string, topic?: string, materialContext?: string): LearningSession {
   return {
     id: crypto.randomUUID(),
     topicId,
+    topic,
+    materialContext,
     state: 'IDLE',
     explanation: '',
     startedAt: new Date(),
@@ -66,8 +68,8 @@ export const useSessionStore = create<SessionStore>()(
         return true;
       },
 
-      startSession(topicId) {
-        set({ session: createNewSession(topicId), error: null });
+      startSession(topicId, topic, materialContext) {
+        set({ session: createNewSession(topicId, topic, materialContext), error: null });
         get().transition('EXPLAINING');
       },
 
