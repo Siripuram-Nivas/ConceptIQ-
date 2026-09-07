@@ -3,6 +3,7 @@ import { ArrowRight, FileText, LogOut } from 'lucide-react';
 import { isDemoMode } from '../ai';
 import { useStudySpaceStore } from '../store/study-space-store';
 import { useAuth } from '../auth/auth-provider';
+import TextParticle from '../components/ui/text-particle';
 
 export function HomePage() {
   const demo = isDemoMode();
@@ -83,11 +84,16 @@ export function HomePage() {
         {/* HERO */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 mb-20 lg:mb-32">
           <div className="lg:col-span-8">
-            <h1 className="font-display text-[4rem] text-fg glass-strong p-6 lg:p-10 -ml-5 lg:-ml-10 leading-none mb-8 inline-block border border-border rounded-r-3xl">
-              DON'T JUST <br />
-              READ IT. <br />
-              <span className="text-accent-yellow">EXPLAIN IT.</span>
-            </h1>
+            <div className="glass-strong p-6 lg:p-10 -ml-5 lg:-ml-10 mb-8 inline-block border border-border rounded-r-3xl w-full h-[340px] max-w-[600px] overflow-hidden relative">
+              <TextParticle
+                text={"DON'T JUST\nREAD IT.\nEXPLAIN IT."}
+                particleDensity={3}
+                particleSize={1.5}
+                particleColor="#FFD24A"
+                fontSize={72}
+                fontFamily="'Degular', Arial, sans-serif"
+              />
+            </div>
             <p className="text-lg lg:text-xl font-medium text-fg max-w-xl leading-relaxed mb-10 border-l-[3px] border-border pl-6 py-2">
               ConceptIQ turns your study material into a living knowledge system — then tests whether you actually understand it.
             </p>

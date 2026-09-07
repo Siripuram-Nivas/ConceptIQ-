@@ -1,5 +1,5 @@
-import { AuthUI } from '../components/ui/auth-ui';
+import { AuthUI } from '../components/ui/auth-fuse';
 
 export function LoginPage() {
-  return <AuthUI initialView="signin" />;
+  return <AuthUI />;
 }

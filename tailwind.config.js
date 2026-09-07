@@ -4,6 +4,36 @@ export default {
   theme: {
     extend: {
       colors: {
+        /* shadcn CSS-variable tokens ──────────────────────────────── */
+        background: 'hsl(var(--background))',
+        foreground: 'hsl(var(--foreground))',
+        muted: {
+          DEFAULT: 'hsl(var(--muted))',
+          foreground: 'hsl(var(--muted-foreground))',
+        },
+        popover: {
+          DEFAULT: 'hsl(var(--popover))',
+          foreground: 'hsl(var(--popover-foreground))',
+        },
+        card: {
+          DEFAULT: 'hsl(var(--card))',
+          foreground: 'hsl(var(--card-foreground))',
+        },
+        primary: {
+          DEFAULT: 'hsl(var(--primary))',
+          foreground: 'hsl(var(--primary-foreground))',
+        },
+        secondary: {
+          DEFAULT: 'hsl(var(--secondary))',
+          foreground: 'hsl(var(--secondary-foreground))',
+        },
+        destructive: {
+          DEFAULT: 'hsl(var(--destructive))',
+          foreground: 'hsl(var(--destructive-foreground))',
+        },
+        input: 'hsl(var(--input) / <alpha-value>)',
+        ring: 'hsl(var(--ring))',
+        /* existing project tokens ─────────────────────────────────── */
         bg: '#070A12',
         'bg-secondary': '#0D1220',
         fg: '#FFFFFF',

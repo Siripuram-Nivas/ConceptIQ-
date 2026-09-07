@@ -8,8 +8,26 @@
 @layer base {
   :root {
     --radius: 1rem;
+    /* shadcn-compatible CSS tokens (used by auth-fuse and ui primitives) */
+    --background: 222 47% 6%;
+    --foreground: 0 0% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --popover: 222 47% 8%;
+    --popover-foreground: 0 0% 98%;
+    --border: 0 0% 100% / 0.14;
+    --input: 0 0% 100% / 0.10;
+    --card: 222 47% 8%;
+    --card-foreground: 0 0% 98%;
+    --primary: 48 100% 64%;
+    --primary-foreground: 222 47% 6%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 0 0% 98%;
     --accent: oklch(0.89 0 0);
+    --accent-foreground: 222 47% 6%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: oklch(0.985 0 0);
+    --ring: 48 100% 64%;
   }
 
   .dark {
