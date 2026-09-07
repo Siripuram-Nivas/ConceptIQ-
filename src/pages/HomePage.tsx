@@ -47,7 +47,7 @@ export function HomePage() {
 
   return (
     <div className="min-h-screen bg-bg">
-      <div className="max-w-[1440px] mx-auto px-5 lg:px-10 pt-10 pb-32">
+      <div className="max-w-[1440px] mx-auto px-5 lg:px-10 pt-10 pb-16">
         {/* TOP BAR */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-12">
           <div>

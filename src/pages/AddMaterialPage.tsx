@@ -63,8 +63,9 @@ export function AddMaterialPage() {
     }
 
     try {
-      // For non-PPTX we still need to read as text for the store's backward-compat path
-      const text = isPptx ? '' : await file.text();
+      // For TXT we still need to read as text for the store's backward-compat path
+      const isPdf = file.name.toLowerCase().endsWith('.pdf');
+      const text = (isPptx || isPdf) ? '' : await file.text();
       const title = file.name.replace(/\.[^/.]+$/, '');
       const targetSpaceId = getOrCreateSpaceId(title);
 

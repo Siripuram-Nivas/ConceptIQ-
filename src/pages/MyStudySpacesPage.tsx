@@ -34,7 +34,7 @@ export function MyStudySpacesPage() {
 
   return (
     <div className="w-full flex-1 flex flex-col">
-      <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20 pt-12 md:pt-20 pb-32 w-full">
+      <div className="max-w-[1440px] mx-auto px-6 md:px-12 lg:px-20 pt-12 md:pt-20 pb-16 w-full">
         <div className="mb-12 border-b border-white/[0.05] pb-6 flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
             <h1 className="font-display font-black text-[3rem] md:text-[5rem] uppercase tracking-tighter leading-none text-white mb-4">STUDY<br/><span className="text-accent-yellow">SPACES</span></h1>

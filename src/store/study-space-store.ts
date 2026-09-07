@@ -4,6 +4,7 @@ import type { StudySpace, UploadedMaterial, KnowledgeMap, KnowledgeMapNode, Conc
 import { createMaterialProcessor } from '../ai/material-processor';
 import { idbStorage } from '../lib/idb-storage';
 import { parsePptx, slidesToCanonicalText } from '../lib/pptx-parser';
+import { parsePdf } from '../lib/pdf-parser';
 
 interface StudySpaceStore {
   // Study Spaces
@@ -151,6 +152,7 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
         try {
           let contentToProcess = text;
           let slideCount: number | undefined;
+          let pageCount: number | undefined;
           let pptxWarnings: string[] | undefined;
 
           if (isPptx && file) {
@@ -166,6 +168,19 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
             set((state) => ({
               materials: state.materials.map((m) =>
                 m.id === materialId ? { ...m, slideCount, pptxWarnings } : m
+              ),
+            }));
+          } else if (file && file.name.toLowerCase().endsWith('.pdf')) {
+            // ── PDF BRANCH ───────────────────────────────────────────
+            const parseResult = await parsePdf(file);
+            pageCount = parseResult.totalPages;
+            
+            // Set content to extracted text instead of raw PDF binary
+            contentToProcess = parseResult.extractedText;
+
+            set((state) => ({
+              materials: state.materials.map((m) =>
+                m.id === materialId ? { ...m, slideCount: pageCount } : m // Reuse slideCount field for page counts in UI
               ),
             }));
           }
