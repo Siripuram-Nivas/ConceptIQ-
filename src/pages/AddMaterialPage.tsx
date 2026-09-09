@@ -264,21 +264,21 @@ export function AddMaterialPage() {
 
                 {/* PASTE BLOCK */}
                 <section>
-                  <div className="editorial-card p-6 lg:p-10 border-4 border-fg bg-accent-pink">
-                    <h2 className="font-display text-3xl font-bold text-fg mb-4">PASTE NOTES</h2>
+                  <div className="editorial-card p-6 lg:p-10 glass-panel">
+                    <h2 className="font-display text-3xl font-bold text-fg mb-4">PASTE YOUR MATERIAL.</h2>
                     <textarea
                       value={pastedText}
                       onChange={(e) => setPastedText(e.target.value)}
                       disabled={isLoading}
-                      placeholder="Paste your study notes, article text, or lecture transcript here..."
-                      className="w-full h-48 px-6 py-4 glass-panel text-fg text-lg font-medium resize-none focus:outline-none focus:ring-4 focus:ring-fg transition-all shadow-[inset_0_2px_4px_rgba(0,0,0,0.1)] mb-6"
+                      placeholder="Paste notes, lecture content, an article, or a transcript…"
+                      className="w-full h-48 px-6 py-4 glass-subtle text-fg text-lg font-medium resize-none focus:outline-none focus:ring-4 focus:ring-accent-yellow transition-all mb-6"
                     />
                     <button
                       onClick={handlePaste}
                       disabled={!pastedText.trim() || isLoading}
                       className="editorial-btn-primary w-full md:w-auto text-xl"
                     >
-                      {isLoading ? 'Processing Material…' : 'Analyze Pasted Material'}
+                      {isLoading ? 'Processing Material…' : 'ANALYZE MATERIAL'}
                     </button>
                   </div>
                 </section>

@@ -4,6 +4,16 @@ import { ArrowLeft, BookOpen, BrainCircuit, Zap, Presentation, AlertTriangle, Mo
 import { useStudySpaceStore } from '../store/study-space-store';
 import { useSessionStore } from '../store/session-store';
 import { DemoModeIndicator } from '../components/DemoModeIndicator';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../components/ui/alert-dialog';
 
 export function MaterialOverviewPage() {
   const navigate = useNavigate();
@@ -140,55 +150,61 @@ export function MaterialOverviewPage() {
             </button>
           </div>
 
-          {showDeleteConfirm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-              <div className="bg-surface border-4 border-fg p-8 max-w-md w-full shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-                <h3 className="font-display font-black text-2xl uppercase tracking-tighter mb-4">Delete Material?</h3>
-                <p className="text-fg/80 font-medium mb-8">This action cannot be undone. This material and all its extracted concepts will be removed from this study space.</p>
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => setShowDeleteConfirm(false)}
-                    className="flex-1 px-4 py-3 border-2 border-fg font-bold uppercase tracking-wider hover:bg-black/5"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleDeleteMaterial}
-                    className="flex-1 px-4 py-3 bg-red-500 text-white font-bold uppercase tracking-wider border-2 border-fg hover:bg-red-600"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+            <AlertDialogContent className="bg-surface-strong border-border-strong sm:max-w-[425px]">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="font-display text-xl text-fg uppercase tracking-tight">
+                  Delete "{currentMaterial.title}"?
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-muted-foreground leading-relaxed mt-2">
+                  This action cannot be undone. This material and all its extracted concepts will be removed from this study space.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="mt-6 gap-3 sm:gap-2">
+                <AlertDialogCancel 
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="editorial-btn-outline h-10 px-4 py-2 hover:bg-surface-light rounded-md border-border-strong"
+                >
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction 
+                  onClick={handleDeleteMaterial}
+                  className="h-10 px-4 py-2 bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-md font-medium transition-colors"
+                >
+                  Delete Material
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
-          {conceptToDelete && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-              <div className="bg-surface border-4 border-fg p-8 max-w-md w-full shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-                <h3 className="font-display font-black text-2xl uppercase tracking-tighter mb-4">Delete "{conceptToDelete}"?</h3>
-                <div className="text-fg/80 font-medium mb-8 space-y-4">
+          <AlertDialog open={!!conceptToDelete} onOpenChange={(open) => !open && setConceptToDelete(null)}>
+            <AlertDialogContent className="bg-surface-strong border-border-strong sm:max-w-[425px]">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="font-display text-xl text-fg uppercase tracking-tight">
+                  Delete "{conceptToDelete}"?
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-muted-foreground leading-relaxed mt-2 space-y-4">
                   <p>This removes the concept from your ConceptIQ Knowledge Map.</p>
-                  <p className="text-accent-purple font-bold">Your original study material will NOT be deleted.</p>
+                  <p className="font-bold">Your original study material will NOT be deleted.</p>
                   <p>Your learning history will be preserved where possible.</p>
-                </div>
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => setConceptToDelete(null)}
-                    className="flex-1 px-4 py-3 border-2 border-fg font-bold uppercase tracking-wider hover:bg-black/5"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleConfirmDeleteConcept}
-                    className="flex-1 px-4 py-3 bg-red-500 text-white font-bold uppercase tracking-wider border-2 border-fg hover:bg-red-600"
-                  >
-                    Delete Concept
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="mt-6 gap-3 sm:gap-2">
+                <AlertDialogCancel 
+                  onClick={() => setConceptToDelete(null)}
+                  className="editorial-btn-outline h-10 px-4 py-2 hover:bg-surface-light rounded-md border-border-strong"
+                >
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction 
+                  onClick={handleConfirmDeleteConcept}
+                  className="h-10 px-4 py-2 bg-destructive text-destructive-foreground hover:bg-destructive/90 rounded-md font-medium transition-colors"
+                >
+                  Delete Concept
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
           <h1 className="font-display text-display-lg text-fg leading-none mb-8">
             {processedContent.title}
@@ -286,7 +302,7 @@ export function MaterialOverviewPage() {
                                   setShowDeleteMenuFor(null);
                                   setConceptToDelete(concept.name);
                                 }}
-                                className="w-full text-left px-4 py-3 text-sm font-bold uppercase tracking-wider text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
+                                className="w-full text-left px-4 py-3 text-sm font-bold uppercase tracking-wider text-fg hover:bg-black/10 transition-colors flex items-center gap-2"
                               >
                                 <Trash2 size={16} /> Delete Concept
                               </button>
