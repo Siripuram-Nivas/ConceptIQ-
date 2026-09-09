@@ -5,7 +5,47 @@ import type { SessionAnalysis, AdaptiveQuestion, RepairContent, LearningSession 
 // The proxy lives in server/ and is only used in production or development with a key.
 export class LiveAIProvider implements AIProvider {
   async analyzeExplanation(session: LearningSession, explanation: string): Promise<SessionAnalysis> {
-    return this.call('analyzeExplanation', { session, explanation });
+    const enrichedPayload = this.enrichPayloadWithMaterialContext(session, explanation);
+    return this.call('analyzeExplanation', enrichedPayload);
+  }
+
+  private enrichPayloadWithMaterialContext(session: LearningSession, explanation: string) {
+    // topicId holds the material ID. We need to attach the actual material context for the backend
+    // since the backend is stateless and doesn't have access to IndexedDB.
+    let topicName = session.topicId;
+    let materialContext = undefined;
+    
+    // In a browser environment, we can dynamically import the store to get the material
+    try {
+      // Find the concept name from the URL if we are in TeachBack
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const conceptFromUrl = params.get('concept');
+        if (conceptFromUrl) topicName = conceptFromUrl;
+      }
+      
+      // Import store safely
+      const { useStudySpaceStore } = require('../store/study-space-store');
+      const material = useStudySpaceStore.getState().getMaterialById(session.topicId);
+      
+      if (material && material.processedContent) {
+        const { summary, keyTerms, sections, concepts } = material.processedContent;
+        if (!topicName || topicName === session.topicId) {
+          topicName = concepts[0]?.name || material.title;
+        }
+        
+        const relevantSection = sections?.find((s: any) =>
+          s.title.toLowerCase().includes(topicName.toLowerCase())
+        );
+        materialContext = relevantSection
+          ? `${summary ?? ''}\n\n${relevantSection.title}:\n${relevantSection.content.slice(0, 3000)}`
+          : `${summary ?? ''}\n\n${keyTerms?.map((t: any) => `${t.term}: ${t.definition}`).join('\n') ?? ''}`.slice(0, 4000);
+      }
+    } catch (e) {
+      console.warn('Failed to enrich payload with material context', e);
+    }
+
+    return { session, explanation, topicName, materialContext };
   }
 
   async generateFollowUpQuestion(analysis: SessionAnalysis): Promise<AdaptiveQuestion> {

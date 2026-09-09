@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { LearningSession, SessionState } from '../types';
 import { getAIProvider, isDemoMode } from '../ai';
-import { DemoProvider } from '../ai/demo-provider';
 import { idbStorage } from '../lib/idb-storage';
 import { useStudySpaceStore } from './study-space-store';
 
@@ -24,7 +23,7 @@ interface SessionStore {
   isDemo: boolean;
   error: string | null;
 
-  startSession: (topicId: string, topic?: string, materialContext?: string) => void;
+  startSession: (topicId: string) => void;
   updateExplanationDraft: (text: string) => void;
   submitExplanation: (text: string) => Promise<void>;
   submitFollowUp: (answer: string, confidence: number) => Promise<void>;
@@ -36,12 +35,10 @@ interface SessionStore {
   resetDemo: () => void;
 }
 
-function createNewSession(topicId: string, topic?: string, materialContext?: string): LearningSession {
+function createNewSession(topicId: string): LearningSession {
   return {
     id: crypto.randomUUID(),
     topicId,
-    topic,
-    materialContext,
     state: 'IDLE',
     explanation: '',
     startedAt: new Date(),
@@ -68,8 +65,8 @@ export const useSessionStore = create<SessionStore>()(
         return true;
       },
 
-      startSession(topicId, topic, materialContext) {
-        set({ session: createNewSession(topicId, topic, materialContext), error: null });
+      startSession(topicId) {
+        set({ session: createNewSession(topicId), error: null });
         get().transition('EXPLAINING');
       },
 
@@ -96,19 +93,9 @@ export const useSessionStore = create<SessionStore>()(
           if (!session.isDemoMode && (analysis.recommendedAction === 'mastered' || analysis.overallStatus === 'mastered')) {
             useStudySpaceStore.getState().syncSessionToMap(session.topicId, analysis);
           }
-        } catch {
-          set({ error: 'Analysis failed. Switching to Demo Mode.' });
-          const demo = new DemoProvider();
-          const sessionWithText = { ...session, explanation: text };
-          const analysis = await demo.analyzeExplanation(sessionWithText, text);
-          const challenge = await demo.generateFollowUpQuestion(analysis);
-          set((s) => ({
-            session: s.session ? { ...s.session, analysis, challenge, state: 'ANALYSIS' } : null,
-            isDemo: true,
-          }));
-          if (!session.isDemoMode && (analysis.recommendedAction === 'mastered' || analysis.overallStatus === 'mastered')) {
-            useStudySpaceStore.getState().syncSessionToMap(session.topicId, analysis);
-          }
+        } catch (error) {
+          set({ error: 'AI processing failed. Please try again.' });
+          transition('EXPLAINING');
         }
       },
 
@@ -145,16 +132,9 @@ export const useSessionStore = create<SessionStore>()(
           if (!session.isDemoMode) {
             useStudySpaceStore.getState().syncSessionToMap(session.topicId, finalAnalysis);
           }
-        } catch {
-          const demo = new DemoProvider();
-          const finalAnalysis = await demo.evaluateReExplanation(session, text);
-          set((s) => ({
-            session: s.session ? { ...s.session, finalAnalysis, state: 'MASTERY' } : null,
-            isDemo: true,
-          }));
-          if (!session.isDemoMode) {
-            useStudySpaceStore.getState().syncSessionToMap(session.topicId, finalAnalysis);
-          }
+        } catch (error) {
+          set({ error: 'AI processing failed. Please try again.' });
+          transition('RE_EXPLAIN');
         }
       },
 

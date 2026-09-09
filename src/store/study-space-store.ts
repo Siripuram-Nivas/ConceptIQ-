@@ -261,16 +261,79 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
         const material = get().materials.find((m) => m.id === materialId);
         if (!material) return;
 
-        set((state) => ({
-          materials: state.materials.filter((m) => m.id !== materialId),
-          studySpaces: state.studySpaces.map((s) =>
-            s.id === material.studySpaceId
-              ? { ...s, materialIds: s.materialIds.filter((id) => id !== materialId) }
-              : s
-          ),
-        }));
+        const spaceId = material.studySpaceId;
 
+        // Clear active session if it belongs to this material
+        try {
+          const { useSessionStore } = require('./session-store');
+          if (useSessionStore.getState().session?.topicId === materialId) {
+            useSessionStore.getState().resetSession();
+          }
+        } catch (e) {
+          console.warn('Could not reset session', e);
+        }
 
+        set((state) => {
+          const remainingMaterials = state.materials.filter((m) => m.id !== materialId);
+          
+          // Find concepts unique to this material
+          const conceptsInDeletedMaterial = material.processedContent?.concepts.map(c => c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')) || [];
+          
+          const sharedConcepts = new Set<string>();
+          remainingMaterials.forEach(m => {
+            if (m.studySpaceId === spaceId) {
+              m.processedContent?.concepts.forEach(c => {
+                sharedConcepts.add(c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+              });
+            }
+          });
+
+          const uniqueConcepts = conceptsInDeletedMaterial.filter(c => !sharedConcepts.has(c));
+
+          // Update Knowledge Map
+          let newKnowledgeMaps = [...state.knowledgeMaps];
+          let updatedMap = newKnowledgeMaps.find(m => m.studySpaceId === spaceId);
+          let newProgress = null;
+
+          if (updatedMap) {
+            const newNodes = updatedMap.nodes.filter(n => !uniqueConcepts.includes(n.id));
+            const newEdges = updatedMap.edges.filter(e => !uniqueConcepts.includes(e.from) && !uniqueConcepts.includes(e.to));
+            
+            updatedMap = {
+              ...updatedMap,
+              nodes: newNodes,
+              edges: newEdges,
+              version: updatedMap.version + 1,
+              updatedAt: new Date()
+            };
+
+            newKnowledgeMaps = newKnowledgeMaps.map(m => m.studySpaceId === spaceId ? updatedMap! : m);
+
+            // Recalculate progress based on remaining nodes
+            newProgress = {
+              conceptsMastered: newNodes.filter(n => n.status === 'mastered' || n.status === 'strong').length,
+              conceptsPartial: newNodes.filter(n => n.status === 'partial').length,
+              conceptsWeak: newNodes.filter(n => n.status === 'weak' || n.status === 'not_started').length,
+              misconceptionsDetected: newNodes.filter(n => n.status === 'potential_misconception').length,
+            };
+          }
+
+          return {
+            materials: remainingMaterials,
+            knowledgeMaps: newKnowledgeMaps,
+            studySpaces: state.studySpaces.map((s) => {
+              if (s.id === spaceId) {
+                return {
+                  ...s,
+                  materialIds: s.materialIds.filter((id) => id !== materialId),
+                  history: s.history.filter(h => h.materialId !== materialId), // Remove material-specific activities
+                  progress: newProgress || s.progress
+                };
+              }
+              return s;
+            }),
+          };
+        });
       },
 
       getKnowledgeMapForSpace(spaceId) {

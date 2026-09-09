@@ -11,8 +11,10 @@ function getClient(): GoogleGenAI {
 }
 
 // ── Input limits ──────────────────────────────────────────────────────────────
-const MAX_MATERIAL_CHARS = 20_000; // ~5k tokens
-const MAX_EXPLANATION_CHARS = 4_000;
+// Flash 2.0 has 1M context. We removed destructive chunking limits here 
+// because MaterialProcessor chunks it safely on the client to avoid serverless timeouts.
+const MAX_MATERIAL_CHARS = 2_000_000;
+const MAX_EXPLANATION_CHARS = 100_000;
 
 function trimMaterial(text: string): string {
   if (!text) return '';
@@ -80,10 +82,18 @@ const sessionAnalysisSchema = {
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-async function extractConcepts(payload: any) {
-  const { materialText, materialTitle } = payload;
+interface ExtractConceptsRequest {
+  materialText: string;
+  materialTitle?: string;
+}
+
+async function extractConcepts(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    throw { status: 400, message: 'Invalid payload' };
+  }
+  const { materialText, materialTitle } = payload as ExtractConceptsRequest;
   if (!materialText || typeof materialText !== 'string') {
-    throw new Error('extractConcepts: materialText is required');
+    throw { status: 400, message: 'extractConcepts: materialText is required and must be a string' };
   }
 
   const ai = getClient();
@@ -168,24 +178,40 @@ IMPORTANT: All concepts and relationships must be derived from the actual materi
   return JSON.parse(response.text ?? '{}');
 }
 
-async function analyzeExplanation(payload: any) {
-  const { session, explanation } = payload;
-  if (!explanation || typeof explanation !== 'string') {
-    throw new Error('analyzeExplanation: explanation is required');
+interface AnalyzeExplanationRequest {
+  session: {
+    topicId: string;
+    [key: string]: any;
+  };
+  explanation: string;
+  topicName?: string;
+  materialContext?: string;
+}
+
+async function analyzeExplanation(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    throw { status: 400, message: 'Invalid payload' };
   }
-  if (!session?.topicId) {
-    throw new Error('analyzeExplanation: session.topicId is required');
+  const { session, explanation, topicName, materialContext } = payload as AnalyzeExplanationRequest;
+  if (!explanation || typeof explanation !== 'string') {
+    throw { status: 400, message: 'analyzeExplanation: explanation is required and must be a string' };
+  }
+  if (!session || typeof session !== 'object') {
+    throw { status: 400, message: 'analyzeExplanation: session object is required' };
+  }
+  if (!session.topicId || typeof session.topicId !== 'string') {
+    throw { status: 400, message: 'analyzeExplanation: session.topicId is required and must be a string' };
   }
 
   const ai = getClient();
   const trimmedExplanation = trimExplanation(explanation);
-  const materialContext = trimMaterial(session.materialContext ?? '');
-  const topic = session.topic ?? session.topicId;
+  const trimmedMaterialContext = trimMaterial(materialContext ?? '');
+  const topic = topicName ?? session.topicId;
 
   const prompt = `You are an educational AI evaluating a student's understanding.
 
 Topic being taught: ${topic}
-${materialContext ? `\nRelevant material context:\n${materialContext}` : ''}
+${trimmedMaterialContext ? `\nRelevant material context:\n${trimmedMaterialContext}` : ''}
 
 The student was asked to explain: "${topic}"
 
@@ -200,6 +226,7 @@ Evaluate this explanation carefully:
 5. Assign an overall status based on the quality of the actual explanation
 
 CRITICAL RULES:
+- GROUNDING: Base your evaluation STRICTLY on the provided "Relevant material context". Do NOT invent facts or rely on outside knowledge. If the provided context is insufficient to evaluate a point, return "Insufficient source evidence to confidently evaluate this point." rather than hallucinating an answer.
 - Base studentEvidence ONLY on what the student actually said. Do NOT add evidence they did not demonstrate.
 - If the student's explanation contains errors, classify those as potential_misconception, NOT mastered.
 - The status must reflect actual understanding, not just that they tried.
@@ -222,9 +249,23 @@ CRITICAL RULES:
   return JSON.parse(response.text ?? '{}');
 }
 
-async function generateFollowUpQuestion(payload: any) {
-  const { analysis } = payload;
-  if (!analysis) throw new Error('generateFollowUpQuestion: analysis is required');
+interface GenerateFollowUpRequest {
+  analysis: {
+    topic: string;
+    concepts?: any[];
+    misconceptions?: any[];
+    [key: string]: any;
+  };
+}
+
+async function generateFollowUpQuestion(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    throw { status: 400, message: 'Invalid payload' };
+  }
+  const { analysis } = payload as GenerateFollowUpRequest;
+  if (!analysis || typeof analysis !== 'object' || !analysis.topic) {
+    throw { status: 400, message: 'generateFollowUpQuestion: valid analysis object with a topic is required' };
+  }
 
   const ai = getClient();
 
@@ -272,9 +313,23 @@ The question must be directly about ${analysis.topic} and ${targetConcept.concep
   return JSON.parse(response.text ?? '{}');
 }
 
-async function generateRepair(payload: any) {
-  const { analysis } = payload;
-  if (!analysis) throw new Error('generateRepair: analysis is required');
+interface GenerateRepairRequest {
+  analysis: {
+    topic: string;
+    concepts?: any[];
+    misconceptions?: any[];
+    [key: string]: any;
+  };
+}
+
+async function generateRepair(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    throw { status: 400, message: 'Invalid payload' };
+  }
+  const { analysis } = payload as GenerateRepairRequest;
+  if (!analysis || typeof analysis !== 'object' || !analysis.topic) {
+    throw { status: 400, message: 'generateRepair: valid analysis object with a topic is required' };
+  }
 
   const ai = getClient();
 
@@ -335,10 +390,27 @@ The repair must target the EXACT weakness identified, not generic content about 
   return JSON.parse(response.text ?? '{}');
 }
 
-async function evaluateReExplanation(payload: any) {
-  const { session, reExplanation } = payload;
+interface EvaluateReExplanationRequest {
+  session: {
+    topicId: string;
+    topic?: string;
+    materialContext?: string;
+    analysis?: { concepts?: any[] };
+    [key: string]: any;
+  };
+  reExplanation: string;
+}
+
+async function evaluateReExplanation(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    throw { status: 400, message: 'Invalid payload' };
+  }
+  const { session, reExplanation } = payload as EvaluateReExplanationRequest;
   if (!reExplanation || typeof reExplanation !== 'string') {
-    throw new Error('evaluateReExplanation: reExplanation is required');
+    throw { status: 400, message: 'evaluateReExplanation: reExplanation is required and must be a string' };
+  }
+  if (!session || typeof session !== 'object') {
+    throw { status: 400, message: 'evaluateReExplanation: session object is required' };
   }
 
   const ai = getClient();
@@ -429,6 +501,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const result = await handle(payload ?? {});
     return res.status(200).json(result);
   } catch (err: any) {
+    // Check if it's our custom validation error
+    if (err && err.status === 400) {
+      console.warn(`[api/ai] Validation failed:`, err.message);
+      return res.status(400).json({ error: err.message });
+    }
+
     // Distinguish configuration errors from runtime errors
     const msg: string = err?.message ?? 'Internal server error';
     const isConfig = msg.includes('GEMINI_API_KEY');

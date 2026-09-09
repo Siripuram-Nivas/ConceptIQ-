@@ -96,8 +96,6 @@ export interface KeyConcept {
 export interface LearningSession {
   id: string;
   topicId: string;
-  topic?: string;             // Human-readable concept/topic name for AI context
-  materialContext?: string;   // Relevant material excerpt for AI evaluation
   state: SessionState;
   explanation: string;
   transcript?: string;

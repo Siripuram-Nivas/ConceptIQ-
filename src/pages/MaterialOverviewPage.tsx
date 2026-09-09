@@ -64,18 +64,17 @@ export function MaterialOverviewPage() {
 
   const handleStartTeachBack = (concept?: string) => {
     const topicId = currentMaterial.id;
-    const conceptName = concept || processedContent?.concepts[0]?.name || currentMaterial.title;
-    // Pass a relevant excerpt of the material as context for the AI evaluator
-    // Prefer the section content for the selected concept, else the full summary + key terms
-    const relevantSection = processedContent?.sections?.find(s =>
-      s.title.toLowerCase().includes((concept ?? '').toLowerCase())
-    );
-    const materialContext = relevantSection
-      ? `${processedContent?.summary ?? ''}\n\n${relevantSection.title}:\n${relevantSection.content.slice(0, 3000)}`
-      : `${processedContent?.summary ?? ''}\n\n${processedContent?.keyTerms?.map(t => `${t.term}: ${t.definition}`).join('\n') ?? ''}`.slice(0, 4000);
-
-    startSession(topicId, conceptName, materialContext);
+    startSession(topicId);
     navigate(`/teach-material/${currentMaterial.id}${concept ? `?concept=${encodeURIComponent(concept)}` : ''}`);
+  };
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const handleDelete = () => {
+    if (!currentMaterial) return;
+    const spaceId = currentMaterial.studySpaceId;
+    useStudySpaceStore.getState().deleteMaterial(currentMaterial.id);
+    navigate(`/space/${spaceId}`);
   };
 
   return (
@@ -95,23 +94,53 @@ export function MaterialOverviewPage() {
         )}
 
         {/* Title, badge & Summary */}
-        <div className="mb-16">
-          {/* Format badge */}
-          <div className="flex flex-wrap items-center gap-3 mb-4">
-            {currentMaterial.type === 'pptx' && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-accent-yellow/20 border border-accent-yellow/40 rounded text-xs font-bold text-accent-yellow uppercase tracking-wide">
-                <Presentation size={11} /> PowerPoint
-              </span>
-            )}
-            {currentMaterial.type === 'pptx' && currentMaterial.slideCount !== undefined && (
+        <div className="mb-16 relative">
+          <div className="flex justify-between items-start mb-4">
+            {/* Format badge */}
+            <div className="flex flex-wrap items-center gap-3">
+              {currentMaterial.type === 'pptx' && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-accent-yellow/20 border border-accent-yellow/40 rounded text-xs font-bold text-accent-yellow uppercase tracking-wide">
+                  <Presentation size={11} /> PowerPoint
+                </span>
+              )}
+              {currentMaterial.type === 'pptx' && currentMaterial.slideCount !== undefined && (
+                <span className="px-3 py-1 bg-surface rounded text-xs font-bold text-fg/70 uppercase tracking-wide">
+                  {currentMaterial.slideCount} Slides
+                </span>
+              )}
               <span className="px-3 py-1 bg-surface rounded text-xs font-bold text-fg/70 uppercase tracking-wide">
-                {currentMaterial.slideCount} Slides
+                {processedContent.concepts.length} Concepts
               </span>
-            )}
-            <span className="px-3 py-1 bg-surface rounded text-xs font-bold text-fg/70 uppercase tracking-wide">
-              {processedContent.concepts.length} Concepts
-            </span>
+            </div>
+
+            <button 
+              onClick={() => setShowDeleteConfirm(true)}
+              className="text-xs font-bold uppercase tracking-wide text-red-500 hover:text-red-400 transition-colors"
+            >
+              Delete Material
+            </button>
           </div>
+
+          {showDeleteConfirm && (
+            <div className="absolute top-0 right-0 mt-8 p-4 bg-surface border border-border shadow-lg rounded z-10 w-72">
+              <p className="text-sm font-bold text-fg mb-2">Delete "{processedContent.title}"?</p>
+              <p className="text-xs text-muted mb-4">This removes the material from this Study Space.</p>
+              <div className="flex gap-2 justify-end">
+                <button 
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="px-3 py-1.5 text-xs font-bold uppercase text-fg bg-bg hover:bg-fg/5 rounded"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleDelete}
+                  className="px-3 py-1.5 text-xs font-bold uppercase text-white bg-red-500 hover:bg-red-600 rounded"
+                >
+                  Delete Material
+                </button>
+              </div>
+            </div>
+          )}
 
           <h1 className="font-display text-display-lg text-fg leading-none mb-8">
             {processedContent.title}
