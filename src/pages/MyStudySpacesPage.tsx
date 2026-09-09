@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, BookOpen, Clock, Zap, ArrowRight } from 'lucide-react';
+import { Plus, BookOpen, Clock, Zap, ArrowRight, MoreVertical, Trash2 } from 'lucide-react';
 import { useStudySpaceStore } from '../store/study-space-store';
+import { DeleteStudySpaceDialog } from '../components/DeleteStudySpaceDialog';
 
 export function MyStudySpacesPage() {
   const navigate = useNavigate();
   const { studySpaces, selectStudySpace, createStudySpace } = useStudySpaceStore();
   const [showCreate, setShowCreate] = useState(false);
   const [newTitle, setNewTitle] = useState('');
+  const [spaceToDelete, setSpaceToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [showMenuFor, setShowMenuFor] = useState<string | null>(null);
 
   const handleCreate = () => {
     if (newTitle.trim()) {
@@ -105,15 +108,45 @@ export function MyStudySpacesPage() {
                   });
 
               return (
-                <button
+                <div
                   key={space.id}
                   onClick={() => handleSelectSpace(space.id)}
-                  className="group relative flex flex-col text-left bg-white/[0.02] border border-white/[0.08] hover:border-accent-yellow/50 rounded-[16px] overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:bg-white/[0.04] p-6 h-[280px]"
+                  className="group relative flex flex-col text-left bg-white/[0.02] border border-white/[0.08] hover:border-accent-yellow/50 rounded-[16px] overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:bg-white/[0.04] p-6 h-[280px] cursor-pointer"
                 >
                   <div className="flex-1 flex flex-col">
-                    <div className="flex items-start justify-between gap-4 mb-4">
+                    <div className="flex items-start justify-between gap-4 mb-4 relative">
                       <div className="w-12 h-12 rounded-xl bg-white/[0.05] border border-white/[0.1] flex items-center justify-center text-white/70 group-hover:text-accent-yellow group-hover:border-accent-yellow/30 transition-colors">
                         <BookOpen size={24} />
+                      </div>
+                      
+                      <div className="relative">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowMenuFor(showMenuFor === space.id ? null : space.id);
+                          }}
+                          className="p-2 text-white/50 hover:text-white transition-colors rounded-full hover:bg-white/[0.05]"
+                        >
+                          <MoreVertical size={20} />
+                        </button>
+                        
+                        {showMenuFor === space.id && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={(e) => { e.stopPropagation(); setShowMenuFor(null); }} />
+                            <div className="absolute right-0 top-full mt-1 w-48 bg-surface border-2 border-fg shadow-glass z-20 overflow-hidden">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setShowMenuFor(null);
+                                  setSpaceToDelete({ id: space.id, title: space.title });
+                                }}
+                                className="w-full text-left px-4 py-3 text-sm font-bold uppercase tracking-wider text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
+                              >
+                                <Trash2 size={16} /> Delete Space
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                     
@@ -143,10 +176,10 @@ export function MyStudySpacesPage() {
                   </div>
                   
                   {/* Hover Affordance */}
-                  <div className="absolute top-6 right-6 opacity-0 translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300">
+                  <div className="absolute top-6 right-16 opacity-0 translate-x-4 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300">
                     <ArrowRight size={24} className="text-accent-yellow" />
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -165,6 +198,15 @@ export function MyStudySpacesPage() {
               NEW SPACE
             </button>
           </div>
+        )}
+        
+        {spaceToDelete && (
+          <DeleteStudySpaceDialog
+            spaceId={spaceToDelete.id}
+            spaceTitle={spaceToDelete.title}
+            onCancel={() => setSpaceToDelete(null)}
+            onSuccess={() => setSpaceToDelete(null)}
+          />
         )}
       </div>
     </div>

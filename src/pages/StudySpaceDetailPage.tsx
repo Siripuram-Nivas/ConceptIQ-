@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, BookOpen, ChevronRight } from 'lucide-react';
+import { ArrowLeft, BookOpen, ChevronRight, MoreVertical, Trash2 } from 'lucide-react';
 import { useStudySpaceStore } from '../store/study-space-store';
 import { DemoModeIndicator } from '../components/DemoModeIndicator';
+import { DeleteStudySpaceDialog } from '../components/DeleteStudySpaceDialog';
 
 export function StudySpaceDetailPage() {
   const { spaceId } = useParams<{ spaceId: string }>();
@@ -10,6 +11,8 @@ export function StudySpaceDetailPage() {
   const { currentSpace, materials, getKnowledgeMapForSpace, selectStudySpace, updateStudySpaceLastActive } =
     useStudySpaceStore();
   const [spaceMaterials, setSpaceMaterials] = useState<typeof materials>([]);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   useEffect(() => {
     if (spaceId) {
@@ -58,7 +61,34 @@ export function StudySpaceDetailPage() {
 
         {/* Header */}
         <div className="mb-16 border-b border-white/[0.05] pb-10">
-          <h1 className="font-display font-black text-[3.5rem] md:text-[5rem] lg:text-[6rem] leading-[0.85] uppercase tracking-tighter text-white mb-6">{currentSpace.title}</h1>
+          <div className="flex justify-between items-start mb-6">
+            <h1 className="font-display font-black text-[3.5rem] md:text-[5rem] lg:text-[6rem] leading-[0.85] uppercase tracking-tighter text-white">{currentSpace.title}</h1>
+            <div className="relative">
+              <button
+                onClick={() => setShowMenu(!showMenu)}
+                className="p-3 text-white/50 hover:text-white transition-colors rounded-full hover:bg-white/[0.05]"
+              >
+                <MoreVertical size={24} />
+              </button>
+              
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                  <div className="absolute right-0 top-full mt-1 w-56 bg-surface border-2 border-fg shadow-glass z-20 overflow-hidden">
+                    <button 
+                      onClick={() => {
+                        setShowMenu(false);
+                        setShowDeleteDialog(true);
+                      }}
+                      className="w-full text-left px-4 py-3 text-sm font-bold uppercase tracking-wider text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
+                    >
+                      <Trash2 size={16} /> Delete Study Space
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
           {currentSpace.description && (
             <p className="text-xl font-bold uppercase tracking-wide text-white/60 mb-8 max-w-3xl">{currentSpace.description}</p>
           )}
@@ -183,6 +213,18 @@ export function StudySpaceDetailPage() {
 
           </div>
         </div>
+        
+        {showDeleteDialog && (
+          <DeleteStudySpaceDialog
+            spaceId={currentSpace.id}
+            spaceTitle={currentSpace.title}
+            onCancel={() => setShowDeleteDialog(false)}
+            onSuccess={() => {
+              setShowDeleteDialog(false);
+              navigate('/study-spaces');
+            }}
+          />
+        )}
       </div>
     </div>
   );

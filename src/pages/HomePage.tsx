@@ -1,15 +1,19 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowRight, FileText, LogOut } from 'lucide-react';
+import { ArrowRight, FileText, LogOut, MoreVertical, Trash2 } from 'lucide-react';
 import { isDemoMode } from '../ai';
 import { useStudySpaceStore } from '../store/study-space-store';
 import { useAuth } from '../auth/auth-provider';
 import TextParticle from '../components/ui/text-particle';
+import { DeleteStudySpaceDialog } from '../components/DeleteStudySpaceDialog';
 
 export function HomePage() {
   const demo = isDemoMode();
   const { studySpaces, materials, knowledgeMaps } = useStudySpaceStore();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [showMenuFor, setShowMenuFor] = useState<string | null>(null);
+  const [spaceToDelete, setSpaceToDelete] = useState<{ id: string; title: string } | null>(null);
 
   const handleLogout = () => {
     logout();
@@ -125,9 +129,33 @@ export function HomePage() {
                       {recentSpace.progress.conceptsMastered} concepts mastered • {recentSpace.progress.conceptsWeak} need attention
                     </p>
                   </div>
-                  <Link to={`/study-space/${recentSpace.id}`} className="editorial-btn-accent whitespace-nowrap w-full md:w-auto">
-                    Continue Learning
-                  </Link>
+                  <div className="flex items-center gap-4 w-full md:w-auto mt-4 md:mt-0 relative">
+                    <Link to={`/study-space/${recentSpace.id}`} className="editorial-btn-accent whitespace-nowrap flex-1 md:flex-none text-center">
+                      Continue Learning
+                    </Link>
+                    <button
+                      onClick={() => setShowMenuFor(showMenuFor === recentSpace.id ? null : recentSpace.id)}
+                      className="p-2 border border-border text-fg hover:bg-surface transition-colors"
+                    >
+                      <MoreVertical size={20} />
+                    </button>
+                    {showMenuFor === recentSpace.id && (
+                      <>
+                        <div className="fixed inset-0 z-10" onClick={() => setShowMenuFor(null)} />
+                        <div className="absolute right-0 top-full mt-1 w-48 bg-surface border-2 border-fg shadow-glass z-20 overflow-hidden">
+                          <button 
+                            onClick={() => {
+                              setShowMenuFor(null);
+                              setSpaceToDelete({ id: recentSpace.id, title: recentSpace.title });
+                            }}
+                            className="w-full text-left px-4 py-3 text-sm font-bold uppercase tracking-wider text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
+                          >
+                            <Trash2 size={16} /> Delete Space
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </section>
             )}
@@ -229,6 +257,15 @@ export function HomePage() {
 
           </div>
         </div>
+        
+        {spaceToDelete && (
+          <DeleteStudySpaceDialog
+            spaceId={spaceToDelete.id}
+            spaceTitle={spaceToDelete.title}
+            onCancel={() => setSpaceToDelete(null)}
+            onSuccess={() => setSpaceToDelete(null)}
+          />
+        )}
       </div>
     </div>
   );

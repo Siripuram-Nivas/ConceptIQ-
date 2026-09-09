@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, BookOpen, Zap, Presentation, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, BookOpen, BrainCircuit, Zap, Presentation, AlertTriangle, MoreVertical, Trash2 } from 'lucide-react';
 import { useStudySpaceStore } from '../store/study-space-store';
 import { useSessionStore } from '../store/session-store';
 import { DemoModeIndicator } from '../components/DemoModeIndicator';
@@ -8,10 +8,13 @@ import { DemoModeIndicator } from '../components/DemoModeIndicator';
 export function MaterialOverviewPage() {
   const navigate = useNavigate();
   const { materialId } = useParams<{ materialId: string }>();
-  const { getMaterialById } = useStudySpaceStore();
+  const { getMaterialById, deleteConcept } = useStudySpaceStore();
   const currentMaterial = materialId ? getMaterialById(materialId) : null;
   const { startSession } = useSessionStore();
   const [selectedConcept, setSelectedConcept] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteMenuFor, setShowDeleteMenuFor] = useState<string | null>(null);
+  const [conceptToDelete, setConceptToDelete] = useState<string | null>(null);
 
   if (!currentMaterial) {
     return (
@@ -68,14 +71,30 @@ export function MaterialOverviewPage() {
     navigate(`/teach-material/${currentMaterial.id}${concept ? `?concept=${encodeURIComponent(concept)}` : ''}`);
   };
 
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-  const handleDelete = () => {
+  const handleDeleteMaterial = () => {
     if (!currentMaterial) return;
     const spaceId = currentMaterial.studySpaceId;
     useStudySpaceStore.getState().deleteMaterial(currentMaterial.id);
     navigate(`/space/${spaceId}`);
   };
+
+  const handleConfirmDeleteConcept = () => {
+    if (!currentMaterial || !conceptToDelete) return;
+    
+    // Find the canonical concept ID to delete
+    const conceptObj = processedContent?.concepts.find(c => c.name === conceptToDelete);
+    if (conceptObj) {
+      deleteConcept(conceptObj.id, currentMaterial.id);
+    }
+    
+    setConceptToDelete(null);
+    if (selectedConcept === conceptToDelete) {
+      setSelectedConcept(null);
+    }
+  };
+
+  // Check if there are no concepts left
+  const hasConcepts = processedContent && processedContent.concepts.length > 0;
 
   return (
     <div className="min-h-screen bg-bg">
@@ -122,22 +141,51 @@ export function MaterialOverviewPage() {
           </div>
 
           {showDeleteConfirm && (
-            <div className="absolute top-0 right-0 mt-8 p-4 bg-surface border border-border shadow-lg rounded z-10 w-72">
-              <p className="text-sm font-bold text-fg mb-2">Delete "{processedContent.title}"?</p>
-              <p className="text-xs text-muted mb-4">This removes the material from this Study Space.</p>
-              <div className="flex gap-2 justify-end">
-                <button 
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="px-3 py-1.5 text-xs font-bold uppercase text-fg bg-bg hover:bg-fg/5 rounded"
-                >
-                  Cancel
-                </button>
-                <button 
-                  onClick={handleDelete}
-                  className="px-3 py-1.5 text-xs font-bold uppercase text-white bg-red-500 hover:bg-red-600 rounded"
-                >
-                  Delete Material
-                </button>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+              <div className="bg-surface border-4 border-fg p-8 max-w-md w-full shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                <h3 className="font-display font-black text-2xl uppercase tracking-tighter mb-4">Delete Material?</h3>
+                <p className="text-fg/80 font-medium mb-8">This action cannot be undone. This material and all its extracted concepts will be removed from this study space.</p>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 px-4 py-3 border-2 border-fg font-bold uppercase tracking-wider hover:bg-black/5"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDeleteMaterial}
+                    className="flex-1 px-4 py-3 bg-red-500 text-white font-bold uppercase tracking-wider border-2 border-fg hover:bg-red-600"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {conceptToDelete && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+              <div className="bg-surface border-4 border-fg p-8 max-w-md w-full shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+                <h3 className="font-display font-black text-2xl uppercase tracking-tighter mb-4">Delete "{conceptToDelete}"?</h3>
+                <div className="text-fg/80 font-medium mb-8 space-y-4">
+                  <p>This removes the concept from your ConceptIQ Knowledge Map.</p>
+                  <p className="text-accent-purple font-bold">Your original study material will NOT be deleted.</p>
+                  <p>Your learning history will be preserved where possible.</p>
+                </div>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setConceptToDelete(null)}
+                    className="flex-1 px-4 py-3 border-2 border-fg font-bold uppercase tracking-wider hover:bg-black/5"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmDeleteConcept}
+                    className="flex-1 px-4 py-3 bg-red-500 text-white font-bold uppercase tracking-wider border-2 border-fg hover:bg-red-600"
+                  >
+                    Delete Concept
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -172,10 +220,24 @@ export function MaterialOverviewPage() {
         {/* Concepts (What's Inside) */}
         <div className="mb-16">
           <h2 className="font-display text-3xl font-bold uppercase tracking-tight mb-6">What's Inside</h2>
-          <div className="flex flex-wrap gap-3">
-            {processedContent.concepts.map((concept) => (
-              <button
-                key={concept.name}
+          
+          {!hasConcepts ? (
+            <div className="border border-dashed border-fg/20 p-12 text-center rounded">
+              <h3 className="font-display text-2xl font-bold uppercase mb-2">NO ACTIVE CONCEPTS</h3>
+              <p className="text-muted mb-6">Your study material is still available.</p>
+              <button 
+                onClick={() => navigate(`/space/${currentMaterial.studySpaceId}`)}
+                className="editorial-btn-primary"
+              >
+                RETURN TO SPACE
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-3">
+                {processedContent.concepts.map((concept) => (
+                  <button
+                  key={concept.name}
                 onClick={() => setSelectedConcept(selectedConcept === concept.name ? null : concept.name)}
                 className={`px-4 py-2 border-2 border-fg font-bold text-sm transition-all hover:-translate-y-0.5 hover:shadow-glass ${selectedConcept === concept.name
                     ? 'bg-accent-blue text-bg border-accent-blue'
@@ -183,18 +245,57 @@ export function MaterialOverviewPage() {
                   }`}
               >
                 {concept.name}
-              </button>
-            ))}
-          </div>
+                  </button>
+                ))}
+              </div>
 
-          {/* Detailed View for Selected Concept */}
-          {selectedConcept && (
-            <div className="mt-8 p-6 lg:p-8 border-4 border-fg bg-accent-pink shadow-glass">
+              {/* Detailed View for Selected Concept */}
+              {selectedConcept && (
+            <div className="mt-8 p-6 lg:p-8 border-4 border-fg bg-accent-pink shadow-glass relative">
               {processedContent.concepts
                 .filter((c) => c.name === selectedConcept)
                 .map((concept) => (
                   <div key={concept.name}>
-                    <h3 className="font-display text-3xl font-bold text-fg mb-4">{concept.name}</h3>
+                    <div className="flex justify-between items-start mb-4">
+                      <h3 className="font-display text-3xl font-bold text-fg pr-8">{concept.name}</h3>
+                      
+                      {/* Concept Action Menu */}
+                      <div className="relative">
+                        <button 
+                          onClick={() => setShowDeleteMenuFor(showDeleteMenuFor === concept.name ? null : concept.name)}
+                          className="p-2 hover:bg-black/10 rounded-full transition-colors"
+                        >
+                          <MoreVertical size={20} className="text-fg" />
+                        </button>
+                        
+                        {showDeleteMenuFor === concept.name && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setShowDeleteMenuFor(null)} />
+                            <div className="absolute right-0 top-full mt-1 w-48 bg-surface border-2 border-fg shadow-glass z-20 overflow-hidden">
+                              <button 
+                                onClick={() => {
+                                  setShowDeleteMenuFor(null);
+                                  handleStartTeachBack(concept.name);
+                                }}
+                                className="w-full text-left px-4 py-3 text-sm font-bold uppercase tracking-wider hover:bg-black/5 transition-colors border-b border-fg/10 flex items-center gap-2"
+                              >
+                                <BrainCircuit size={16} /> TeachBack
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setShowDeleteMenuFor(null);
+                                  setConceptToDelete(concept.name);
+                                }}
+                                className="w-full text-left px-4 py-3 text-sm font-bold uppercase tracking-wider text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
+                              >
+                                <Trash2 size={16} /> Delete Concept
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    
                     <p className="text-lg font-medium text-fg/90 mb-6">{concept.definition}</p>
 
                     {concept.keyPoints.length > 0 && (
@@ -213,6 +314,8 @@ export function MaterialOverviewPage() {
                   </div>
                 ))}
             </div>
+          )}
+            </>
           )}
         </div>
 

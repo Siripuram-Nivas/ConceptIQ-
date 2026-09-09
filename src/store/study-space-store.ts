@@ -6,6 +6,7 @@ import { isDemoMode } from '../ai';
 import { idbStorage } from '../lib/idb-storage';
 import { parsePptx, slidesToCanonicalText } from '../lib/pptx-parser';
 import { parsePdf } from '../lib/pdf-parser';
+import { useSessionStore } from './session-store';
 
 interface StudySpaceStore {
   // Study Spaces
@@ -22,6 +23,7 @@ interface StudySpaceStore {
 
   // Actions
   createStudySpace: (title: string, description?: string) => string;
+  deleteStudySpace: (spaceId: string) => void;
   selectStudySpace: (spaceId: string) => void;
   updateSpaceProgress: (spaceId: string, updates: Partial<StudySpace['progress']>) => void;
   updateStudySpaceLastActive: (spaceId: string) => void;
@@ -30,6 +32,7 @@ interface StudySpaceStore {
   addMaterialToSpace: (spaceId: string, file: File | null, text: string) => Promise<void>;
   getMaterialById: (id: string) => UploadedMaterial | null;
   deleteMaterial: (materialId: string) => void;
+  deleteConcept: (conceptId: string, materialId: string) => void;
 
   getKnowledgeMapForSpace: (spaceId: string) => KnowledgeMap | null;
   updateMapNode: (spaceId: string, nodeId: string, updates: Partial<KnowledgeMapNode>) => void;
@@ -76,6 +79,29 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
         }));
 
         return spaceId;
+      },
+
+      deleteStudySpace(spaceId) {
+        const { materials, currentSpaceId } = get();
+        
+        // Find materials belonging to this space
+        const spaceMaterials = materials.filter(m => m.studySpaceId === spaceId);
+        const spaceMaterialIds = spaceMaterials.map(m => m.id);
+        
+        // Invalidate active session if it belongs to this space
+        const sessionStore = useSessionStore.getState();
+        if (sessionStore.session && spaceMaterialIds.includes(sessionStore.session.topicId)) {
+          sessionStore.resetSession();
+        }
+
+        set((state) => ({
+          studySpaces: state.studySpaces.filter(s => s.id !== spaceId),
+          materials: state.materials.filter(m => m.studySpaceId !== spaceId),
+          knowledgeMaps: state.knowledgeMaps.filter(km => km.studySpaceId !== spaceId),
+          currentSpaceId: currentSpaceId === spaceId ? null : state.currentSpaceId,
+          currentSpace: currentSpaceId === spaceId ? null : state.currentSpace,
+          currentMap: currentSpaceId === spaceId ? null : state.currentMap,
+        }));
       },
 
       selectStudySpace(spaceId) {
@@ -332,6 +358,86 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
               }
               return s;
             }),
+          };
+        });
+      },
+
+      deleteConcept(conceptId, materialId) {
+        const material = get().materials.find((m) => m.id === materialId);
+        if (!material || !material.processedContent) return;
+
+        const spaceId = material.studySpaceId;
+
+        set((state) => {
+          const remainingMaterials = state.materials.map(m => {
+            if (m.id === materialId && m.processedContent) {
+              return {
+                ...m,
+                processedContent: {
+                  ...m.processedContent,
+                  concepts: m.processedContent.concepts.filter(c => 
+                    // Compare both canonical ID and raw ID just to be safe
+                    c.id !== conceptId && 
+                    c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') !== conceptId
+                  )
+                }
+              };
+            }
+            return m;
+          });
+
+          // Check if this concept is still used by ANY material in this study space
+          let isConceptStillUsed = false;
+          for (const m of remainingMaterials) {
+            if (m.studySpaceId === spaceId && m.processedContent) {
+              if (m.processedContent.concepts.some(c => 
+                c.id === conceptId || 
+                c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') === conceptId
+              )) {
+                isConceptStillUsed = true;
+                break;
+              }
+            }
+          }
+
+          let newKnowledgeMaps = [...state.knowledgeMaps];
+          let updatedMap = newKnowledgeMaps.find(m => m.studySpaceId === spaceId);
+          let newProgress = null;
+
+          // If no other material uses this concept, remove it from the knowledge map
+          if (updatedMap && !isConceptStillUsed) {
+            const newNodes = updatedMap.nodes.filter(n => n.id !== conceptId);
+            // Remove edges where the concept is the source or target
+            const newEdges = updatedMap.edges.filter(e => e.from !== conceptId && e.to !== conceptId);
+            
+            updatedMap = {
+              ...updatedMap,
+              nodes: newNodes,
+              edges: newEdges,
+              version: updatedMap.version + 1,
+              updatedAt: new Date()
+            };
+
+            newKnowledgeMaps = newKnowledgeMaps.map(m => m.studySpaceId === spaceId ? updatedMap! : m);
+
+            // Recalculate progress based on remaining active nodes
+            newProgress = {
+              conceptsMastered: newNodes.filter(n => n.status === 'mastered' || n.status === 'strong').length,
+              conceptsPartial: newNodes.filter(n => n.status === 'partial').length,
+              conceptsWeak: newNodes.filter(n => n.status === 'weak' || n.status === 'not_started').length,
+              misconceptionsDetected: newNodes.filter(n => n.status === 'potential_misconception').length,
+            };
+          }
+
+          return {
+            materials: remainingMaterials,
+            knowledgeMaps: newKnowledgeMaps,
+            studySpaces: state.studySpaces.map((s) => {
+              if (s.id === spaceId && newProgress) {
+                return { ...s, progress: newProgress };
+              }
+              return s;
+            })
           };
         });
       },
