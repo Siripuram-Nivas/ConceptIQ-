@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI, Type } from '@google/genai';
 
 // ── Model ────────────────────────────────────────────────────────────────────
-const MODEL = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
+const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3.6-flash';
 
 function getClient(): GoogleGenAI {
   const key = process.env.GEMINI_API_KEY;
@@ -82,18 +82,18 @@ const sessionAnalysisSchema = {
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
-interface ExtractConceptsRequest {
+interface ExtractChunkRequest {
   materialText: string;
   materialTitle?: string;
 }
 
-async function extractConcepts(payload: unknown) {
+async function extractChunkIntelligence(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     throw { status: 400, message: 'Invalid payload' };
   }
-  const { materialText, materialTitle } = payload as ExtractConceptsRequest;
+  const { materialText, materialTitle } = payload as ExtractChunkRequest;
   if (!materialText || typeof materialText !== 'string') {
-    throw { status: 400, message: 'extractConcepts: materialText is required and must be a string' };
+    throw { status: 400, message: 'extractChunkIntelligence: materialText is required' };
   }
 
   const ai = getClient();
@@ -102,7 +102,6 @@ async function extractConcepts(payload: unknown) {
   const schema = {
     type: Type.OBJECT,
     properties: {
-      summary: { type: Type.STRING },
       concepts: {
         type: Type.ARRAY,
         items: {
@@ -113,8 +112,9 @@ async function extractConcepts(payload: unknown) {
             keyPoints:       { type: Type.ARRAY, items: { type: Type.STRING } },
             relatedConcepts: { type: Type.ARRAY, items: { type: Type.STRING } },
             importance:      { type: Type.STRING, enum: ['high', 'medium', 'low'] },
+            sourceReferences:{ type: Type.ARRAY, items: { type: Type.STRING } },
           },
-          required: ['name', 'definition', 'keyPoints', 'relatedConcepts', 'importance'],
+          required: ['name', 'definition', 'keyPoints', 'relatedConcepts', 'importance', 'sourceReferences'],
         },
       },
       relationships: {
@@ -140,31 +140,146 @@ async function extractConcepts(payload: unknown) {
           required: ['term', 'definition'],
         },
       },
-      suggestedLearningPath: { type: Type.ARRAY, items: { type: Type.STRING } },
+      keyIdeas: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            idea: { type: Type.STRING },
+            explanation: { type: Type.STRING },
+            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ['idea', 'explanation', 'sourceReferences']
+        }
+      },
+      importantResults: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            result: { type: Type.STRING },
+            significance: { type: Type.STRING },
+            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ['result', 'significance', 'sourceReferences']
+        }
+      },
+      groundedClaims: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            claim: { type: Type.STRING },
+            type: { type: Type.STRING, enum: ['fact', 'interpretation', 'inference'] },
+            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ['claim', 'type', 'sourceReferences']
+        }
+      }
     },
-    required: ['summary', 'concepts', 'relationships', 'keyTerms', 'suggestedLearningPath'],
+    required: ['concepts', 'relationships', 'keyTerms', 'keyIdeas', 'importantResults', 'groundedClaims'],
   };
 
-  const prompt = `You are an expert educational AI. Analyze the following study material and extract structured learning concepts.
+  const prompt = `You are an expert educational AI analyzing a chunk of study material.
 
 Material title: ${materialTitle || 'Untitled'}
 
-Material content:
+Chunk Content:
 ${trimmed}
 
-Extract:
-1. A concise summary of the entire material (2–4 sentences)
-2. The key concepts a student must understand (5–12 concepts maximum). For EACH concept, provide:
-   - A clear, accurate name
-   - A precise definition drawn directly from the material
-   - 3–5 key points a student must know
-   - Related concepts from the same material
-   - Importance: high, medium, or low
-3. Relationships between concepts (e.g., "TCP depends_on IP", "3NF extends 2NF")
-4. Key terms with definitions
-5. A suggested learning order (concept names in sequence)
+Extract the following intelligence, ensuring ALL items are grounded strictly in this chunk. DO NOT hallucinate external information.
+1. Key Concepts (important topics/entities, max 8)
+2. Relationships (how concepts relate)
+3. Key Terms (vocabulary definitions)
+4. Key Ideas (core themes/arguments/principles)
+5. Important Results (formulas, numerical results, conclusions)
+6. Grounded Claims (specific facts or inferences made in the text)
 
-IMPORTANT: All concepts and relationships must be derived from the actual material content. Do not add concepts that are not present in the material.`;
+IMPORTANT PROVENANCE RULES:
+- Every concept, key idea, result, and claim MUST include "sourceReferences" that point exactly to the pages/slides explicitly mentioned in the chunk (e.g. ["Page 4"], ["Slide 12", "Slide 13"]).
+- DO NOT invent source references.
+- Distinguish between literal facts and inferences for claims.`;
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+    },
+  });
+
+  return JSON.parse(response.text ?? '{}');
+}
+
+interface AggregateMaterialRequest {
+  materialTitle: string;
+  chunks: any[];
+}
+
+async function aggregateMaterial(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    throw { status: 400, message: 'Invalid payload' };
+  }
+  const { materialTitle, chunks } = payload as AggregateMaterialRequest;
+  
+  if (!chunks || !Array.isArray(chunks)) {
+    throw { status: 400, message: 'aggregateMaterial: chunks array is required' };
+  }
+
+  // Authoritative Backend Limits
+  const MAX_CHUNKS = 50; 
+  if (chunks.length > MAX_CHUNKS) {
+    throw { status: 400, message: `aggregateMaterial: Too many chunks (${chunks.length}). Max allowed in single pass is ${MAX_CHUNKS}. Hierarchical aggregation required.` };
+  }
+  
+  // Basic byte limit check (4MB for serverless safety)
+  const payloadStr = JSON.stringify(chunks);
+  if (Buffer.byteLength(payloadStr, 'utf8') > 4_000_000) {
+    throw { status: 400, message: 'aggregateMaterial: Payload exceeds 4MB limit. Hierarchical aggregation required.' };
+  }
+
+  const ai = getClient();
+  const trimmedPayloadStr = payloadStr;
+
+  const schema = {
+    type: Type.OBJECT,
+    properties: {
+      summary: { type: Type.STRING },
+      explanation: { type: Type.STRING },
+      sourceAwareInsights: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            insight: { type: Type.STRING },
+            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ['insight', 'sourceReferences']
+        }
+      },
+      suggestedLearningPath: { type: Type.ARRAY, items: { type: Type.STRING } },
+    },
+    required: ['summary', 'explanation', 'sourceAwareInsights', 'suggestedLearningPath'],
+  };
+
+  const prompt = `You are an expert educational AI performing a global document synthesis.
+
+Material title: ${materialTitle || 'Untitled'}
+
+You are provided with the aggregated intelligence from ${chunks.length} chunks of this document, containing concepts, key ideas, and results.
+Data:
+${trimmedPayloadStr}
+
+Generate the following global document intelligence:
+1. A comprehensive Final Document Summary (2-4 paragraphs) that accurately reflects the entire document.
+2. A Student-Friendly Explanation (a narrative walkthrough of the material's core message).
+3. Source-Aware Insights (overall themes or advanced conclusions, citing the sources they span across).
+4. A suggested learning path (logical sequence of top concept names).
+
+IMPORTANT: 
+- Preserve the truth of the source. Do not hallucinate external knowledge.
+- Do not let the explanation or summary simply reflect the first chunk. Incorporate intelligence from across all provided chunks.`;
 
   const response = await ai.models.generateContent({
     model: MODEL,
@@ -205,13 +320,21 @@ async function analyzeExplanation(payload: unknown) {
 
   const ai = getClient();
   const trimmedExplanation = trimExplanation(explanation);
-  const trimmedMaterialContext = trimMaterial(materialContext ?? '');
+  
+  // Authoritative Context Check: Reject unbounded context
+  const maxContextBytes = 40_000;
+  let validatedContext = materialContext ?? '';
+  if (Buffer.byteLength(validatedContext, 'utf8') > maxContextBytes) {
+    validatedContext = validatedContext.slice(0, maxContextBytes);
+    console.warn(`[api/ai] analyzeExplanation: Context exceeded ${maxContextBytes} bytes and was truncated to prevent hallucination/overloading. Frontend must use context budget.`);
+  }
+
   const topic = topicName ?? session.topicId;
 
   const prompt = `You are an educational AI evaluating a student's understanding.
 
 Topic being taught: ${topic}
-${trimmedMaterialContext ? `\nRelevant material context:\n${trimmedMaterialContext}` : ''}
+${validatedContext ? `\nRelevant material context:\n${validatedContext}` : ''}
 
 The student was asked to explain: "${topic}"
 
@@ -457,7 +580,8 @@ If the student repeated the same errors, scores should not increase significantl
 type Handler = (payload: any) => Promise<any>;
 
 const HANDLERS: Record<string, Handler> = {
-  extractConcepts,
+  extractChunkIntelligence,
+  aggregateMaterial,
   analyzeExplanation,
   generateFollowUpQuestion,
   generateRepair,
@@ -498,23 +622,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const result = await handle(payload ?? {});
+    const result = await Promise.race([
+      handle(payload ?? {}),
+      new Promise((_, reject) => 
+        setTimeout(() => reject({ status: 504, code: 'AI_PROVIDER_UNAVAILABLE', message: 'Provider timeout exceeded' }), 30000)
+      )
+    ]);
     return res.status(200).json(result);
   } catch (err: any) {
-    // Check if it's our custom validation error
     if (err && err.status === 400) {
       console.warn(`[api/ai] Validation failed:`, err.message);
-      return res.status(400).json({ error: err.message });
+      return res.status(400).json({ error: { code: 'INVALID_REQUEST', message: err.message } });
     }
 
-    // Distinguish configuration errors from runtime errors
-    const msg: string = err?.message ?? 'Internal server error';
+    if (err && (err.status === 503 || err.status === 504)) {
+      return res.status(err.status).json({ error: { code: 'AI_PROVIDER_UNAVAILABLE', message: err.message } });
+    }
+
+    const msg: string = err?.message ?? 'Internal API processing failed';
     const isConfig = msg.includes('GEMINI_API_KEY');
-    console.error(`[api/ai] ${method} failed:`, msg);
-    return res.status(isConfig ? 503 : 500).json({
-      error: isConfig
-        ? 'AI service is not configured. Contact the administrator.'
-        : `AI operation failed: ${msg}`,
+    
+    if (isConfig) {
+      return res.status(503).json({ error: { code: 'AI_PROVIDER_UNAVAILABLE', message: 'AI service is not configured' } });
+    }
+
+    if (err?.status === 404 || msg.includes('NOT_FOUND') || msg.includes('no longer available')) {
+      console.warn(`[api/ai] Model unavailable:`, msg);
+      return res.status(503).json({
+        error: {
+          code: 'AI_MODEL_UNAVAILABLE',
+          message: msg,
+          provider: 'LIVE',
+          model: MODEL,
+          operation: method
+        }
+      });
+    }
+
+    console.error(`[api/ai] ${method} failed:`, err);
+    return res.status(500).json({
+      error: {
+        code: 'INTERNAL_API_ERROR',
+        message: msg
+      }
     });
   }
 }

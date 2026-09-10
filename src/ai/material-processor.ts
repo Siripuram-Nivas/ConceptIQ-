@@ -1,5 +1,4 @@
-import type { ProcessedMaterial, ExtractedConcept, KeyTerm, MaterialSection, SourceReference } from '../types';
-import { isDemoMode } from './index';
+import type { ProcessedMaterial, ExtractedConcept, KeyTerm, MaterialSection, SourceReference, ProcessingManifest, ChunkIntelligence } from '../types';
 
 // ── Document Sectioning ────────────────────────────────────────────────────────
 
@@ -132,50 +131,149 @@ function chunkSections(sections: MaterialSection[]): { text: string; pages: numb
 
 // ── Live AI path ───────────────────────────────────────────────────────────────
 
-async function callExtractConcepts(materialText: string, materialTitle: string) {
-  const response = await fetch('/api/ai', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      method: 'extractConcepts',
-      payload: { materialText, materialTitle },
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(`AI concept extraction failed (${response.status}): ${err.error ?? 'Unknown'}`);
+function computeHash(text: string): string {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
   }
+  return Math.abs(hash).toString(16);
+}
 
-  return response.json();
+// ── Live AI path ───────────────────────────────────────────────────────────────
+
+async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  let attempt = 0;
+  while (attempt <= maxRetries) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      if (attempt === maxRetries) throw err;
+      
+      const status = err.status || 500;
+      // Retry on 502 (API down during startup/crash), 503/504 (Provider down) or fetch network errors
+      const shouldRetry = status === 502 || status === 503 || status === 504 || err.message?.includes('fetch failed');
+      
+      if (!shouldRetry) throw err;
+      
+      attempt++;
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1))); // 1s, 2s, 4s
+    }
+  }
+  throw new Error('Unreachable');
+}
+
+async function callExtractChunkIntelligence(materialText: string, materialTitle: string) {
+  return callWithRetry(async () => {
+    const response = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        method: 'extractChunkIntelligence',
+        payload: { materialText, materialTitle },
+      }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+      throw { status: response.status, message: `AI chunk extraction failed (${response.status}): ${errData?.error?.message || errData?.error || 'Unknown'}` };
+    }
+
+    return response.json();
+  });
+}
+
+async function callAggregateMaterial(materialTitle: string, chunks: any[]) {
+  return callWithRetry(async () => {
+    const response = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        method: 'aggregateMaterial',
+        payload: { materialTitle, chunks },
+      }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+      throw { status: response.status, message: `AI aggregation failed (${response.status}): ${errData?.error?.message || errData?.error || 'Unknown'}` };
+    }
+
+    return response.json();
+  });
 }
 
 // ── MaterialProcessor ─────────────────────────────────────────────────────────
 
-export class MaterialProcessor {
-  async processText(content: string, originalFileName?: string): Promise<ProcessedMaterial> {
-    const title = extractTitle(content, originalFileName);
+export interface ProcessorOptions {
+  materialId: string;
+  onProgress?: (manifest: ProcessingManifest, newChunks: ChunkIntelligence[]) => void;
+  existingManifest?: ProcessingManifest;
+  isDemo?: boolean;
+}
 
-    // Extract FULL sections, no truncation
+export class MaterialProcessor {
+  async processText(
+    content: string, 
+    originalFileName?: string,
+    options?: ProcessorOptions
+  ): Promise<{ processed: ProcessedMaterial; manifest: ProcessingManifest; chunks: ChunkIntelligence[] }> {
+    const title = extractTitle(content, originalFileName);
+    const sourceFingerprint = computeHash(content);
+    
+    // Extract FULL sections
     const sections = extractSectionsOffline(content);
     const sourceReferences = createSourceReferencesOffline(sections);
 
-    if (isDemoMode()) {
-      // Demo mode
+    const isDemo = options?.isDemo ?? false;
+
+    if (isDemo) {
+      // Demo mode fallback...
       await new Promise(r => setTimeout(r, 800));
       const summary = generateSummaryOffline(content);
       const concepts = this.extractConceptsDemo(content);
       const keyTerms = this.extractKeyTermsDemo(content);
       const suggestedLearningPath = concepts.slice(0, 5).map(c => c.name);
-      return { title, summary, sections, concepts, keyTerms, sourceReferences, suggestedLearningPath };
+      
+      const manifest: ProcessingManifest = {
+        processingRunId: 'demo-run', sourceFingerprint, materialVersion: 1, promptVersion: '1', modelVersion: '1', schemaVersion: '1', processorVersion: '1',
+        sourceExtractionStatus: 'succeeded', chunkProcessingStatus: 'succeeded', aggregationStatus: 'succeeded', indexingStatus: 'pending', knowledgeMapStatus: 'pending',
+        totalPages: 1, totalChunks: 1, completedChunks: 1, failedChunks: 0
+      };
+      
+      const processed = { 
+        title, summary, explanation: 'Demo explanation', sections, concepts, keyTerms, keyIdeas: [], importantResults: [], groundedClaims: [], sourceAwareInsights: [], sourceReferences, suggestedLearningPath
+      };
+      return { processed, manifest, chunks: [] };
     }
 
-    // LIVE MODE: Chunking to bypass Vercel timeout limits and preserve context limits
+    // LIVE MODE: 10X Architecture
     const chunks = chunkSections(sections);
-    const aggregatedConcepts: Map<string, ExtractedConcept> = new Map();
-    const aggregatedRelationships: any[] = [];
-    const aggregatedKeyTerms: Map<string, KeyTerm> = new Map();
-    const summaries: string[] = [];
+    
+    // Initialize or resume manifest
+    const manifest: ProcessingManifest = options?.existingManifest ?? {
+      processingRunId: crypto.randomUUID(),
+      sourceFingerprint,
+      materialVersion: 1,
+      promptVersion: '1.0',
+      modelVersion: 'gemini-2.5-flash',
+      schemaVersion: '1.0',
+      processorVersion: '2.0',
+      sourceExtractionStatus: 'succeeded',
+      chunkProcessingStatus: 'pending',
+      aggregationStatus: 'pending',
+      indexingStatus: 'pending',
+      knowledgeMapStatus: 'pending',
+      totalPages: sections.length,
+      totalChunks: chunks.length,
+      completedChunks: 0,
+      failedChunks: 0
+    };
+
+    const chunkIntelligences: ChunkIntelligence[] = [];
+    manifest.chunkProcessingStatus = 'processing';
+    if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
 
     const concurrency = 3;
     let i = 0;
@@ -183,107 +281,137 @@ export class MaterialProcessor {
     while (i < chunks.length) {
       const batch = chunks.slice(i, i + concurrency);
       
-      const promises = batch.map(async (chunk) => {
-        const pageRange = chunk.pages.length > 0 
-          ? ` (Pages ${Math.min(...chunk.pages)}-${Math.max(...chunk.pages)})` 
-          : '';
+      const promises = batch.map(async (chunk, batchIdx) => {
+        const chunkIndex = i + batchIdx;
+        const pageStart = Math.min(...chunk.pages, 1);
+        const pageEnd = Math.max(...chunk.pages, 1);
+        const chunkHash = computeHash(chunk.text);
+        
+        const pageRange = chunk.pages.length > 0 ? ` (Pages ${pageStart}-${pageEnd})` : '';
         const chunkTitle = `${title}${pageRange}`;
         
         try {
-          const aiResult = await callExtractConcepts(chunk.text, chunkTitle);
-          return { success: true, aiResult, chunk };
+          const aiResult = await callExtractChunkIntelligence(chunk.text, chunkTitle);
+          
+          const chunkIntel: ChunkIntelligence = {
+            processingRunId: manifest.processingRunId,
+            materialId: options?.materialId || 'unknown',
+            materialVersion: manifest.materialVersion,
+            chunkId: crypto.randomUUID(),
+            chunkHash,
+            chunkIndex,
+            pageStart,
+            pageEnd,
+            concepts: aiResult.concepts || [],
+            keyTerms: aiResult.keyTerms || [],
+            keyIdeas: aiResult.keyIdeas || [],
+            importantResults: aiResult.importantResults || [],
+            relationships: aiResult.relationships || [],
+            groundedClaims: aiResult.groundedClaims || [],
+            sourceReferences: [], // from aiResult eventually
+          };
+          
+          return { success: true, chunkIntel };
         } catch (error) {
-          console.error('Chunk processing failed:', error);
+          console.error(`Chunk ${chunkIndex} processing failed:`, error);
           return { success: false, error };
         }
       });
 
       const results = await Promise.all(promises);
       
-      // Check for failures
       const failed = results.filter(r => !r.success);
       if (failed.length > 0) {
+        manifest.failedChunks += failed.length;
+        manifest.chunkProcessingStatus = 'failed';
+        if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
         throw new Error(`Failed to process document chunk(s). Aborting to prevent data corruption. Error: ${failed[0].error}`);
       }
 
-      // Aggregate
       for (const result of results) {
-        if (!result.success || !result.aiResult || !result.chunk) continue;
-        
-        const res = result.aiResult;
-        
-        if (res.summary) summaries.push(res.summary);
-        
-        if (res.concepts) {
-          res.concepts.forEach((c: any) => {
-            const canonicalId = c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-            
-            // Build the source reference string from the chunk's pages
-            const pagesStr = result.chunk!.pages.length > 0 
-              ? (title.includes('.pptx') ? `Slide(s) ${result.chunk!.pages.join(', ')}` : `Page(s) ${result.chunk!.pages.join(', ')}`)
-              : 'Unknown location';
-            
-            if (aggregatedConcepts.has(canonicalId)) {
-              // Merge definition/keyPoints if needed, or append source reference
-              const existing = aggregatedConcepts.get(canonicalId)!;
-              if (!existing.sourceReference?.includes(pagesStr)) {
-                existing.sourceReference += `; ${pagesStr}`;
-              }
-            } else {
-              aggregatedConcepts.set(canonicalId, {
-                id: canonicalId,
-                name: c.name,
-                canonicalName: c.name,
-                aliases: [],
-                definition: c.definition ?? '',
-                keyPoints: c.keyPoints ?? [],
-                relatedConcepts: c.relatedConcepts ?? [],
-                sourceReference: pagesStr,
-                masteryStatus: 'not_started' as const,
-                evidence: [],
-                missingEvidence: [],
-              });
-            }
-          });
-        }
-        
-        if (res.relationships) {
-          aggregatedRelationships.push(...res.relationships);
-        }
-        
-        if (res.keyTerms) {
-          res.keyTerms.forEach((kt: any) => {
-            const canonicalTerm = kt.term.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-            if (!aggregatedKeyTerms.has(canonicalTerm)) {
-              aggregatedKeyTerms.set(canonicalTerm, { term: kt.term, definition: kt.definition });
-            }
-          });
+        if (result.success && result.chunkIntel) {
+          chunkIntelligences.push(result.chunkIntel);
+          manifest.completedChunks++;
         }
       }
-
+      
+      if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
       i += concurrency;
     }
 
-    const finalConcepts = Array.from(aggregatedConcepts.values());
-    const finalKeyTerms = Array.from(aggregatedKeyTerms.values());
-    
-    // Simple summary aggregation (join the first sentence of each chunk's summary)
-    const finalSummary = summaries.length > 0 
-      ? summaries.map(s => s.split(/[.!?]/)[0].trim() + '.').join(' ')
-      : generateSummaryOffline(content);
+    manifest.chunkProcessingStatus = 'succeeded';
+    manifest.aggregationStatus = 'processing';
+    if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
+
+    // Aggregation Phase
+    const aggregatedConcepts: Map<string, ExtractedConcept> = new Map();
+    const aggregatedRelationships: any[] = [];
+    const aggregatedKeyTerms: Map<string, KeyTerm> = new Map();
+    const aggregatedKeyIdeas: any[] = [];
+    const aggregatedImportantResults: any[] = [];
+    const aggregatedGroundedClaims: any[] = [];
+
+    // Combine local items
+    for (const intel of chunkIntelligences) {
+      intel.concepts.forEach(c => {
+        const canonicalId = c.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        if (!aggregatedConcepts.has(canonicalId)) {
+          aggregatedConcepts.set(canonicalId, {
+            id: canonicalId, name: c.name, canonicalName: c.name, aliases: [],
+            definition: c.definition, keyPoints: c.keyPoints || [], relatedConcepts: c.relatedConcepts || [],
+            sourceReference: (c as any).sourceReferences?.join('; ') || 'Unknown',
+            masteryStatus: 'not_started', evidence: [], missingEvidence: []
+          });
+        }
+      });
+      intel.keyTerms.forEach(kt => {
+        const canonicalTerm = kt.term.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        if (!aggregatedKeyTerms.has(canonicalTerm)) aggregatedKeyTerms.set(canonicalTerm, kt);
+      });
+      aggregatedKeyIdeas.push(...intel.keyIdeas);
+      aggregatedImportantResults.push(...intel.importantResults);
+      aggregatedRelationships.push(...intel.relationships);
+      aggregatedGroundedClaims.push(...intel.groundedClaims);
+    }
+
+    // Server-side Aggregation
+    // Send minimal chunk representation to save bytes
+    const aggregationPayload = chunkIntelligences.map(ci => ({
+      chunkIndex: ci.chunkIndex,
+      concepts: ci.concepts.map(c => c.name),
+      keyIdeas: ci.keyIdeas,
+      importantResults: ci.importantResults
+    }));
+
+    let globalIntelligence;
+    try {
+      globalIntelligence = await callAggregateMaterial(title, aggregationPayload);
+      manifest.aggregationStatus = 'succeeded';
+    } catch (e) {
+      manifest.aggregationStatus = 'failed';
+      if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
+      throw e;
+    }
 
     const finalResult: ProcessedMaterial & { relationships?: any[] } = {
       title,
-      summary: finalSummary,
-      sections, // Full, non-truncated document!
-      concepts: finalConcepts,
-      keyTerms: finalKeyTerms,
+      summary: globalIntelligence.summary || 'Summary unavailable.',
+      explanation: globalIntelligence.explanation || 'Explanation unavailable.',
+      sourceAwareInsights: globalIntelligence.sourceAwareInsights || [],
+      sections, 
+      concepts: Array.from(aggregatedConcepts.values()),
+      keyTerms: Array.from(aggregatedKeyTerms.values()),
+      keyIdeas: aggregatedKeyIdeas,
+      importantResults: aggregatedImportantResults,
+      groundedClaims: aggregatedGroundedClaims,
       sourceReferences,
-      suggestedLearningPath: finalConcepts.slice(0, 10).map(c => c.name),
+      suggestedLearningPath: globalIntelligence.suggestedLearningPath || [],
       relationships: aggregatedRelationships,
     };
 
-    return finalResult;
+    if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
+
+    return { processed: finalResult, manifest, chunks: chunkIntelligences };
   }
 
   // ── Demo-only concept extraction (offline heuristic) ──────────────────────

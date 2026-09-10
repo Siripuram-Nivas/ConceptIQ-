@@ -35,7 +35,7 @@ export const useMaterialStore = create<MaterialStore>((set, get) => ({
           type: file ? (file.name.endsWith('.pdf') ? 'pdf' : 'txt') : 'pasted_text',
           rawContent,
           processingStatus: 'processing',
-          isDemoMode: true,
+          isDemoMode: false,
           processedContent: undefined,
           version: 1,
         },
@@ -46,7 +46,20 @@ export const useMaterialStore = create<MaterialStore>((set, get) => ({
     // Process asynchronously
     try {
       const processor = createMaterialProcessor();
-      const processed = await processor.processText(rawContent, file?.name);
+      const result = await processor.processText(rawContent, file?.name, {
+        materialId,
+        isDemo: false,
+        onProgress: (manifest) => {
+          set((state) => ({
+            materials: state.materials.map((m) =>
+              m.id === materialId ? { ...m, manifest } : m
+            ),
+          }));
+        }
+      });
+      
+      const processed = result.processed;
+      const finalManifest = result.manifest;
 
       set((state) => ({
         materials: state.materials.map((m) =>
@@ -55,6 +68,7 @@ export const useMaterialStore = create<MaterialStore>((set, get) => ({
                 ...m,
                 processingStatus: 'ready',
                 processedContent: processed,
+                manifest: finalManifest,
               }
             : m
         ),
@@ -63,6 +77,7 @@ export const useMaterialStore = create<MaterialStore>((set, get) => ({
               ...get().materials.find((m) => m.id === materialId)!,
               processingStatus: 'ready',
               processedContent: processed,
+              manifest: finalManifest,
             }
           : state.currentMaterial,
       }));

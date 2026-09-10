@@ -225,12 +225,35 @@ export function MaterialOverviewPage() {
             </div>
           )}
 
-          <div className="border-l-4 border-fg pl-6 py-2">
+          <div className="border-l-4 border-fg pl-6 py-2 mb-8">
             <h2 className="text-sm font-bold uppercase tracking-wider text-muted mb-2">Summary</h2>
             <p className="text-xl font-medium text-fg/80 leading-relaxed max-w-3xl">
               {processedContent.summary}
             </p>
           </div>
+
+          {processedContent.explanation && (
+            <div className="border-l-4 border-fg pl-6 py-2">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-muted mb-2">Detailed Explanation</h2>
+              <p className="text-lg font-medium text-fg/80 leading-relaxed max-w-3xl whitespace-pre-wrap">
+                {processedContent.explanation}
+              </p>
+            </div>
+          )}
+
+          {processedContent.sourceAwareInsights && processedContent.sourceAwareInsights.length > 0 && (
+            <div className="mt-12">
+              <h2 className="font-display text-2xl font-bold uppercase tracking-tight mb-6 text-accent-purple">Key Insights</h2>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {processedContent.sourceAwareInsights.map((insight: any, i: number) => (
+                  <div key={i} className="p-5 border-2 border-fg bg-surface shadow-glass">
+                    <p className="font-bold text-lg text-fg mb-2">{insight.insight}</p>
+                    <p className="text-sm font-medium text-fg/60">Source: {insight.sourceReference}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Concepts (What's Inside) */}
@@ -335,10 +358,42 @@ export function MaterialOverviewPage() {
           )}
         </div>
 
-        {/* Key Terms */}
-        {processedContent.keyTerms.length > 0 && (
+        {/* Key Ideas */}
+        {processedContent.keyIdeas && processedContent.keyIdeas.length > 0 && (
           <div className="mb-16">
-            <h2 className="font-display text-3xl font-bold uppercase tracking-tight mb-6">Key Ideas</h2>
+            <h2 className="font-display text-3xl font-bold uppercase tracking-tight mb-6 text-accent-blue">Key Ideas</h2>
+            <div className="space-y-4">
+              {processedContent.keyIdeas.map((idea: any, i: number) => (
+                <div key={i} className="p-6 border-2 border-accent-blue bg-accent-blue/5">
+                  <h3 className="font-bold text-xl text-fg mb-2">{idea.idea}</h3>
+                  <p className="text-fg/80 font-medium leading-relaxed mb-3">{idea.explanation}</p>
+                  <p className="text-sm text-fg/60 font-bold uppercase">Source: {idea.sourceReference}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Important Results */}
+        {processedContent.importantResults && processedContent.importantResults.length > 0 && (
+          <div className="mb-16">
+            <h2 className="font-display text-3xl font-bold uppercase tracking-tight mb-6 text-accent-pink">Important Results</h2>
+            <div className="space-y-4">
+              {processedContent.importantResults.map((res: any, i: number) => (
+                <div key={i} className="p-6 border-2 border-accent-pink bg-accent-pink/5">
+                  <h3 className="font-bold text-xl text-fg mb-2">{res.finding}</h3>
+                  <p className="text-fg/80 font-medium leading-relaxed mb-3">{res.implication}</p>
+                  <p className="text-sm text-fg/60 font-bold uppercase">Source: {res.sourceReference}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Key Terms */}
+        {processedContent.keyTerms && processedContent.keyTerms.length > 0 && (
+          <div className="mb-16">
+            <h2 className="font-display text-3xl font-bold uppercase tracking-tight mb-6">Key Terms</h2>
             <div className="space-y-4">
               {processedContent.keyTerms.map((term, i) => (
                 <div key={term.term} className="editorial-card p-6 flex gap-6 items-start">

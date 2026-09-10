@@ -1,5 +1,6 @@
 import type { AIProvider } from './types';
-import type { SessionAnalysis, AdaptiveQuestion, RepairContent, LearningSession } from '../types';
+import type { SessionAnalysis, AdaptiveQuestion, RepairContent, LearningSession, ExtractedConcept } from '../types';
+import { retrieveRelevantContext } from './context-retriever';
 
 // This provider calls a thin server proxy at /api/ai to protect API keys.
 // The proxy lives in server/ and is only used in production or development with a key.
@@ -29,17 +30,35 @@ export class LiveAIProvider implements AIProvider {
       const material = useStudySpaceStore.getState().getMaterialById(session.topicId);
       
       if (material && material.processedContent) {
-        const { summary, keyTerms, sections, concepts } = material.processedContent;
+        const { concepts } = material.processedContent;
         if (!topicName || topicName === session.topicId) {
           topicName = concepts[0]?.name || material.title;
         }
         
-        const relevantSection = sections?.find((s: any) =>
-          s.title.toLowerCase().includes(topicName.toLowerCase())
-        );
-        materialContext = relevantSection
-          ? `${summary ?? ''}\n\n${relevantSection.title}:\n${relevantSection.content.slice(0, 3000)}`
-          : `${summary ?? ''}\n\n${keyTerms?.map((t: any) => `${t.term}: ${t.definition}`).join('\n') ?? ''}`.slice(0, 4000);
+        let targetConcept: ExtractedConcept | undefined;
+        if (topicName) {
+          targetConcept = concepts.find((c: ExtractedConcept) => c.name.toLowerCase() === topicName!.toLowerCase());
+        }
+        
+        if (targetConcept) {
+          materialContext = retrieveRelevantContext(targetConcept, material.processedContent);
+        } else {
+          // Fallback if no matching concept found, just pull a dummy concept to trigger retrieval
+          const fallbackConcept: ExtractedConcept = {
+            id: 'fallback',
+            name: topicName,
+            canonicalName: topicName,
+            aliases: [],
+            definition: '',
+            keyPoints: [],
+            relatedConcepts: [],
+            sourceReference: '',
+            masteryStatus: 'not_started',
+            evidence: [],
+            missingEvidence: []
+          };
+          materialContext = retrieveRelevantContext(fallbackConcept, material.processedContent);
+        }
       }
     } catch (e) {
       console.warn('Failed to enrich payload with material context', e);

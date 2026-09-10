@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { StudySpace, UploadedMaterial, KnowledgeMap, KnowledgeMapNode, ConceptStatus, Activity } from '../types';
 import { createMaterialProcessor } from '../ai/material-processor';
-import { isDemoMode } from '../ai';
 import { idbStorage } from '../lib/idb-storage';
 import { parsePptx, slidesToCanonicalText } from '../lib/pptx-parser';
 import { parsePdf } from '../lib/pdf-parser';
@@ -164,7 +163,7 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
           type: isPptx ? 'pptx' : file ? (file.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'txt') : 'pasted_text',
           rawContent: text,
           processingStatus: 'processing',
-          isDemoMode: isDemoMode(),
+          isDemoMode: false,
           version: 1,
         };
 
@@ -213,7 +212,21 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
           }
 
           const processor = createMaterialProcessor();
-          const processed = await processor.processText(contentToProcess, file?.name);
+          
+          const result = await processor.processText(contentToProcess, file?.name, {
+            materialId,
+            isDemo: false,
+            onProgress: (manifest) => {
+              set((state) => ({
+                materials: state.materials.map((m) =>
+                  m.id === materialId ? { ...m, manifest } : m
+                ),
+              }));
+            }
+          });
+          
+          const processed = result.processed;
+          const finalManifest = result.manifest;
 
           // For PPTX, update source references to say "Slide N" not "Page N"
           if (isPptx) {
@@ -246,6 +259,7 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
                   ...m,
                   processingStatus: 'ready',
                   processedContent: processed,
+                  manifest: finalManifest,
                   rawContent: contentToProcess,
                 }
                 : m

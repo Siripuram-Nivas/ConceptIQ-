@@ -12,7 +12,7 @@ export type SessionState =
 
 export type ConceptStatus = 'mastered' | 'strong' | 'partial' | 'weak' | 'potential_misconception' | 'not_started';
 
-export type MaterialStatus = 'idle' | 'processing' | 'ready' | 'failed';
+export type MaterialStatus = 'idle' | 'processing' | 'ready' | 'failed' | 'partial';
 
 export interface ConceptEvidence {
   concept: string;
@@ -161,6 +161,29 @@ export interface KeyTerm {
   context?: string;
 }
 
+export interface KeyIdea {
+  idea: string;
+  explanation: string;
+  sourceReferences: string[];
+}
+
+export interface ImportantResult {
+  result: string;
+  significance: string;
+  sourceReferences: string[];
+}
+
+export interface GroundedClaim {
+  claim: string;
+  type: 'fact' | 'interpretation' | 'inference';
+  sourceReferences: string[];
+}
+
+export interface SourceAwareInsight {
+  insight: string;
+  sourceReferences: string[];
+}
+
 export interface MaterialSection {
   id: string;
   title: string;
@@ -171,11 +194,58 @@ export interface MaterialSection {
 export interface ProcessedMaterial {
   title: string;
   summary: string;
+  explanation: string;
   sections: MaterialSection[];
   concepts: ExtractedConcept[];
   keyTerms: KeyTerm[];
+  keyIdeas: KeyIdea[];
+  importantResults: ImportantResult[];
+  groundedClaims: GroundedClaim[];
+  sourceAwareInsights: SourceAwareInsight[];
   sourceReferences: SourceReference[];
   suggestedLearningPath: string[];
+}
+
+export type ProcessingState = 'pending' | 'processing' | 'succeeded' | 'failed' | 'retrying';
+
+export interface ProcessingManifest {
+  processingRunId: string;
+  sourceFingerprint: string;
+  materialVersion: number;
+  promptVersion: string;
+  modelVersion: string;
+  schemaVersion: string;
+  processorVersion: string;
+  
+  sourceExtractionStatus: ProcessingState;
+  chunkProcessingStatus: ProcessingState;
+  aggregationStatus: ProcessingState;
+  indexingStatus: ProcessingState;
+  knowledgeMapStatus: ProcessingState;
+  
+  totalPages: number;
+  totalChunks: number;
+  completedChunks: number;
+  failedChunks: number;
+}
+
+export interface ChunkIntelligence {
+  processingRunId: string;
+  materialId: string;
+  materialVersion: number;
+  chunkId: string;
+  chunkHash: string;
+  chunkIndex: number;
+  pageStart: number;
+  pageEnd: number;
+
+  concepts: ExtractedConcept[];
+  keyTerms: KeyTerm[];
+  keyIdeas: KeyIdea[];
+  importantResults: ImportantResult[];
+  relationships: any[];
+  groundedClaims: GroundedClaim[];
+  sourceReferences: SourceReference[];
 }
 
 export interface UploadedMaterial {
@@ -189,6 +259,7 @@ export interface UploadedMaterial {
   processingStatus: MaterialStatus;
   isDemoMode: boolean;
   processedContent?: ProcessedMaterial;
+  manifest?: ProcessingManifest;
   version: number;
   slideCount?: number;       // populated for pptx
   pptxWarnings?: string[];   // non-fatal parse warnings
