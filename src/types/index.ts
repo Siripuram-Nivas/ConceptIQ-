@@ -12,7 +12,9 @@ export type SessionState =
 
 export type ConceptStatus = 'mastered' | 'strong' | 'partial' | 'weak' | 'potential_misconception' | 'not_started';
 
-export type MaterialStatus = 'idle' | 'processing' | 'ready' | 'failed' | 'partial';
+// 'partial' = some chunks failed, intelligence is incomplete but persisted
+// 'text_complete' = all text processed; visual/OCR content was not analyzed
+export type MaterialStatus = 'idle' | 'processing' | 'ready' | 'failed' | 'partial' | 'text_complete';
 
 export interface ConceptEvidence {
   concept: string;
@@ -96,6 +98,8 @@ export interface KeyConcept {
 export interface LearningSession {
   id: string;
   topicId: string;
+  materialId?: string;
+  materialVersion?: number;
   state: SessionState;
   explanation: string;
   transcript?: string;
@@ -191,22 +195,152 @@ export interface MaterialSection {
   pageNumber?: number;
 }
 
+// ==================================================
+// NEW DOCUMENT INTELLIGENCE TYPES (§6–§37)
+// ==================================================
+
+/**
+ * A mathematical or logical formula extracted from the source.
+ * Formulas are first-class citizens — never flattened to "a formula exists".
+ */
+export interface Formula {
+  expression: string;        // Exact expression, e.g. "Y = −0.947 + 2.448X"
+  variables: string[];       // Variable definitions, e.g. ["Y: predicted value", "X: independent variable"]
+  significance: string;      // What this formula represents in context
+  sourceReferences: string[]; // e.g. ["Page 7"]
+}
+
+/**
+ * One entry in the document's logical table of contents.
+ * Each item represents a major topic with its discovered subtopics.
+ */
+export interface DocumentOutlineItem {
+  id: string;
+  order: number;
+  title: string;
+  subtopics: string[];
+  sourceUnits: string[];   // e.g. ["Page 3", "Page 4"]
+  importance: 'high' | 'medium' | 'low';
+}
+
+/**
+ * A tiered explanation for one topic, at three depth levels (§27, §28).
+ * Level 1 = quickExplanation
+ * Level 2 = detailedExplanation
+ * Level 3 = deepDive
+ */
+export interface TopicExplanation {
+  topicId: string;
+  topicName: string;
+  sourceUnits: string[];
+  quickExplanation: string;      // 1–2 sentences
+  detailedExplanation: string;   // Full paragraph with context
+  deepDive: string;              // Technical depth: definitions, formulas, examples, conditions
+  relatedTopics: string[];
+}
+
+/**
+ * Tracks a piece of content that could NOT be represented in the final intelligence.
+ * Zero Silent Omission Policy (§34): every omission must be documented.
+ */
+export interface DocumentOmission {
+  omissionId: string;
+  topic: string;
+  reason:
+    | 'ocr_unavailable'
+    | 'parser_limitation'
+    | 'ai_failure'
+    | 'context_budget'
+    | 'visual_unavailable'
+    | 'aggregation_loss'
+    | 'table_extraction_failed'
+    | 'unknown';
+  severity: 'low' | 'medium' | 'high';
+  recoverable: boolean;
+  sourceReference?: string;
+}
+
+/**
+ * One row in the Coverage Matrix (§30).
+ * Tracks each important topic/subtopic through all pipeline stages.
+ */
+export interface CoverageEntry {
+  topic: string;
+  subtopic?: string;
+  sourceUnits: string[];
+  extracted: boolean;
+  processed: boolean;
+  represented: boolean;
+  explained: boolean;
+  provenance: boolean;
+  status:
+    | 'DISCOVERED'
+    | 'SOURCE_FOUND'
+    | 'EXTRACTED'
+    | 'PROCESSED'
+    | 'EXPLAINED'
+    | 'PROVENANCE'
+    | 'VERIFIED'
+    | 'FAILED'
+    | 'OMITTED';
+}
+
+export interface RetrievalResponse {
+  status: 'success' | 'insufficient_context';
+  sections: MaterialSection[];
+  sourceReferences: string[];
+  reason?: string;
+}
+
+// ==================================================
+// PROCESSED MATERIAL (full document intelligence)
+// ==================================================
+
 export interface ProcessedMaterial {
   title: string;
+
+  // ── Synthesis ──────────────────────────────────────────────────────────
   summary: string;
+
+  // Tiered explanations (§27) — Level 1, 2, 3
+  quickExplanation: string;      // Level 1: 1 paragraph overview
+  detailedExplanation: string;   // Level 2: topic-by-topic narrative
+  deepDive: string;              // Level 3: full technical depth
+
+  // Legacy field (backward compat — same value as detailedExplanation)
   explanation: string;
+
+  // ── Document Structure (§10, §11) ─────────────────────────────────────
+  documentOutline: DocumentOutlineItem[];
+  topicExplanations: TopicExplanation[];
+
+  // ── Extracted Intelligence ──────────────────────────────────────────────
   sections: MaterialSection[];
   concepts: ExtractedConcept[];
   keyTerms: KeyTerm[];
   keyIdeas: KeyIdea[];
   importantResults: ImportantResult[];
+  formulas: Formula[];              // NEW — formula first-class (§18)
   groundedClaims: GroundedClaim[];
   sourceAwareInsights: SourceAwareInsight[];
   sourceReferences: SourceReference[];
   suggestedLearningPath: string[];
+
+  // ── Conclusions ───────────────────────────────────────────────────────
+  conclusions: string[];            // NEW
+
+  // ── Completeness (§29–§37) ───────────────────────────────────────────
+  omissions: DocumentOmission[];        // NEW — zero silent omission
+  coverageMatrix: CoverageEntry[];      // NEW — machine-readable coverage
+  completenessAuditPassed: boolean;     // NEW — was the audit satisfied?
+  visualLimitationsNoted: boolean;      // NEW — TEXT_COMPLETE vs VISUALLY_COMPLETE
 }
 
-export type ProcessingState = 'pending' | 'processing' | 'succeeded' | 'failed' | 'retrying';
+// ==================================================
+// PROCESSING PIPELINE TYPES
+// ==================================================
+
+export type ProcessingState = 'pending' | 'processing' | 'succeeded' | 'failed' | 'retrying' | 'partial';
 
 export interface ProcessingManifest {
   processingRunId: string;
@@ -216,17 +350,27 @@ export interface ProcessingManifest {
   modelVersion: string;
   schemaVersion: string;
   processorVersion: string;
-  
+
+  // Pipeline stage states
   sourceExtractionStatus: ProcessingState;
   chunkProcessingStatus: ProcessingState;
   aggregationStatus: ProcessingState;
   indexingStatus: ProcessingState;
   knowledgeMapStatus: ProcessingState;
-  
+  completenessAuditStatus: ProcessingState;  // NEW
+
+  // Counts
   totalPages: number;
   totalChunks: number;
   completedChunks: number;
   failedChunks: number;
+  failedChunkIndices: number[];   // NEW — which specific chunks failed
+
+  // Completeness audit results
+  auditCycles: number;            // NEW — how many audit cycles ran (max 2)
+  topicsDiscovered: number;       // NEW — from document outline
+  topicsRepresented: number;      // NEW — covered in final intelligence
+  isPartial: boolean;             // NEW — true if some chunks failed
 }
 
 export interface ChunkIntelligence {
@@ -261,7 +405,7 @@ export interface UploadedMaterial {
   processedContent?: ProcessedMaterial;
   manifest?: ProcessingManifest;
   version: number;
-  slideCount?: number;       // populated for pptx
+  slideCount?: number;       // populated for pptx / pdf
   pptxWarnings?: string[];   // non-fatal parse warnings
 }
 

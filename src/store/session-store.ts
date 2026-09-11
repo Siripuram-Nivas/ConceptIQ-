@@ -4,6 +4,8 @@ import type { LearningSession, SessionState } from '../types';
 import { getAIProvider, isDemoMode } from '../ai';
 import { idbStorage } from '../lib/idb-storage';
 import { useStudySpaceStore } from './study-space-store';
+import { retrieveRelevantContext } from '../ai/context-retriever';
+import type { ExtractedConcept } from '../types';
 
 const VALID_TRANSITIONS: Record<SessionState, SessionState[]> = {
   IDLE: ['EXPLAINING'],
@@ -23,7 +25,7 @@ interface SessionStore {
   isDemo: boolean;
   error: string | null;
 
-  startSession: (topicId: string) => void;
+  startSession: (topicId: string, materialId?: string, materialVersion?: number) => void;
   updateExplanationDraft: (text: string) => void;
   submitExplanation: (text: string) => Promise<void>;
   submitFollowUp: (answer: string, confidence: number) => Promise<void>;
@@ -35,10 +37,12 @@ interface SessionStore {
   resetDemo: () => void;
 }
 
-function createNewSession(topicId: string): LearningSession {
+function createNewSession(topicId: string, materialId?: string, materialVersion?: number): LearningSession {
   return {
     id: crypto.randomUUID(),
     topicId,
+    materialId,
+    materialVersion,
     state: 'IDLE',
     explanation: '',
     startedAt: new Date(),
@@ -65,8 +69,8 @@ export const useSessionStore = create<SessionStore>()(
         return true;
       },
 
-      startSession(topicId) {
-        set({ session: createNewSession(topicId), error: null });
+      startSession(topicId, materialId, materialVersion) {
+        set({ session: createNewSession(topicId, materialId, materialVersion), error: null });
         get().transition('EXPLAINING');
       },
 
@@ -83,7 +87,21 @@ export const useSessionStore = create<SessionStore>()(
         try {
           const provider = getAIProvider();
           const sessionWithText = { ...session, explanation: text };
-          const analysis = await provider.analyzeExplanation(sessionWithText, text);
+          
+          let materialContext = '';
+          const materialId = session.materialId || session.topicId;
+          const material = useStudySpaceStore.getState().getMaterialById(materialId);
+          if (material?.processedContent) {
+            const conceptName = session.topicId;
+            const targetConcept = material.processedContent.concepts?.find((c: ExtractedConcept) => c.name.toLowerCase() === conceptName.toLowerCase());
+            if (targetConcept) {
+              materialContext = retrieveRelevantContext(targetConcept, material.processedContent);
+            } else {
+              materialContext = retrieveRelevantContext({ name: conceptName } as any, material.processedContent);
+            }
+          }
+          
+          const analysis = await provider.analyzeExplanation(sessionWithText, text, materialContext);
           const challenge = await provider.generateFollowUpQuestion(analysis);
           set((s) => ({
             session: s.session
@@ -125,7 +143,21 @@ export const useSessionStore = create<SessionStore>()(
         try {
           const provider = getAIProvider();
           const sessionWithReExplain = { ...session, reExplanation: text };
-          const finalAnalysis = await provider.evaluateReExplanation(sessionWithReExplain, text);
+          
+          let materialContext = '';
+          const materialId = session.materialId || session.topicId;
+          const material = useStudySpaceStore.getState().getMaterialById(materialId);
+          if (material?.processedContent) {
+            const conceptName = session.topicId;
+            const targetConcept = material.processedContent.concepts?.find((c: ExtractedConcept) => c.name.toLowerCase() === conceptName.toLowerCase());
+            if (targetConcept) {
+              materialContext = retrieveRelevantContext(targetConcept, material.processedContent);
+            } else {
+              materialContext = retrieveRelevantContext({ name: conceptName } as any, material.processedContent);
+            }
+          }
+          
+          const finalAnalysis = await provider.evaluateReExplanation(sessionWithReExplain, text, materialContext);
           set((s) => ({
             session: s.session ? { ...s.session, finalAnalysis, state: 'MASTERY' } : null,
           }));

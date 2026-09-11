@@ -17,7 +17,7 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export class DemoProvider implements AIProvider {
   private isDemo = true;
 
-  async analyzeExplanation(session: LearningSession, _explanation: string): Promise<SessionAnalysis> {
+  async analyzeExplanation(session: LearningSession, _explanation: string, _materialContext: string): Promise<SessionAnalysis> {
     await delay(1800); // Simulate processing
     if (session.topicId === 'tcp-three-way-handshake') {
       return { ...DEMO_INITIAL_ANALYSIS };
@@ -49,7 +49,7 @@ export class DemoProvider implements AIProvider {
     return { ...DNA_REPAIR };
   }
 
-  async evaluateReExplanation(session: LearningSession, _reExplanation: string): Promise<SessionAnalysis> {
+  async evaluateReExplanation(session: LearningSession, _reExplanation: string, _materialContext: string): Promise<SessionAnalysis> {
     await delay(2000);
     if (session.topicId === 'tcp-three-way-handshake') {
       return { ...DEMO_FINAL_ANALYSIS };

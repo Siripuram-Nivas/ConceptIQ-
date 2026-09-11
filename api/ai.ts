@@ -2,6 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI, Type } from '@google/genai';
 
 // ── Model ────────────────────────────────────────────────────────────────────
+// Configured via GEMINI_MODEL env var. Current verified working: gemini-3.6-flash.
+// Do NOT change the default without verifying current provider model availability.
 const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3.6-flash';
 
 function getClient(): GoogleGenAI {
@@ -10,11 +12,13 @@ function getClient(): GoogleGenAI {
   return new GoogleGenAI({ apiKey: key });
 }
 
-// ── Input limits ──────────────────────────────────────────────────────────────
-// Flash 2.0 has 1M context. We removed destructive chunking limits here 
-// because MaterialProcessor chunks it safely on the client to avoid serverless timeouts.
+// ── Backend Safety Limits (enforced server-side) ───────────────────────────
 const MAX_MATERIAL_CHARS = 2_000_000;
 const MAX_EXPLANATION_CHARS = 100_000;
+const MAX_CONTEXT_BYTES = 40_000;
+const MAX_CHUNKS_PER_AGGREGATION = 50;
+const MAX_AGGREGATION_BYTES = 4_000_000;
+const MAX_AUDIT_CYCLES = 2;
 
 function trimMaterial(text: string): string {
   if (!text) return '';
@@ -28,7 +32,7 @@ function trimExplanation(text: string): string {
   return text.slice(0, MAX_EXPLANATION_CHARS);
 }
 
-// ── Shared response schemas (mirrors src/types/index.ts) ──────────────────────
+// ── Shared Schemas ────────────────────────────────────────────────────────────
 
 const conceptEvidenceSchema = {
   type: Type.OBJECT,
@@ -80,9 +84,85 @@ const sessionAnalysisSchema = {
   required: ['topic', 'concepts', 'overallStatus', 'misconceptions', 'recommendedAction', 'masteryIndex'],
 };
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
+// ── Document Intelligence Schemas ────────────────────────────────────────────
 
-interface ExtractChunkRequest {
+const formulaSchema = {
+  type: Type.OBJECT,
+  properties: {
+    expression:       { type: Type.STRING },   // Exact notation: "Y = −0.947 + 2.448X"
+    variables:        { type: Type.ARRAY, items: { type: Type.STRING } },
+    significance:     { type: Type.STRING },
+    sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } },
+  },
+  required: ['expression', 'variables', 'significance', 'sourceReferences'],
+};
+
+const documentOutlineItemSchema = {
+  type: Type.OBJECT,
+  properties: {
+    id:          { type: Type.STRING },
+    order:       { type: Type.INTEGER },
+    title:       { type: Type.STRING },
+    subtopics:   { type: Type.ARRAY, items: { type: Type.STRING } },
+    sourceUnits: { type: Type.ARRAY, items: { type: Type.STRING } },
+    importance:  { type: Type.STRING, enum: ['high', 'medium', 'low'] },
+  },
+  required: ['id', 'order', 'title', 'subtopics', 'sourceUnits', 'importance'],
+};
+
+const topicExplanationSchema = {
+  type: Type.OBJECT,
+  properties: {
+    topicId:             { type: Type.STRING },
+    topicName:           { type: Type.STRING },
+    sourceUnits:         { type: Type.ARRAY, items: { type: Type.STRING } },
+    quickExplanation:    { type: Type.STRING },    // 1–2 sentences
+    detailedExplanation: { type: Type.STRING },    // Full paragraph
+    deepDive:            { type: Type.STRING },    // Technical depth
+    relatedTopics:       { type: Type.ARRAY, items: { type: Type.STRING } },
+  },
+  required: ['topicId', 'topicName', 'sourceUnits', 'quickExplanation', 'detailedExplanation', 'deepDive', 'relatedTopics'],
+};
+
+const omissionSchema = {
+  type: Type.OBJECT,
+  properties: {
+    omissionId:      { type: Type.STRING },
+    topic:           { type: Type.STRING },
+    reason:          { type: Type.STRING },
+    severity:        { type: Type.STRING, enum: ['low', 'medium', 'high'] },
+    recoverable:     { type: Type.BOOLEAN },
+    sourceReference: { type: Type.STRING, nullable: true },
+  },
+  required: ['omissionId', 'topic', 'reason', 'severity', 'recoverable'],
+};
+
+const coverageEntrySchema = {
+  type: Type.OBJECT,
+  properties: {
+    topic:           { type: Type.STRING },
+    subtopic:        { type: Type.STRING, nullable: true },
+    sourceUnits:     { type: Type.ARRAY, items: { type: Type.STRING } },
+    extracted:       { type: Type.BOOLEAN },
+    processed:       { type: Type.BOOLEAN },
+    represented:     { type: Type.BOOLEAN },
+    explained:       { type: Type.BOOLEAN },
+    provenance:      { type: Type.BOOLEAN },
+    status:          { type: Type.STRING, enum: ['DISCOVERED', 'SOURCE_FOUND', 'EXTRACTED', 'PROCESSED', 'EXPLAINED', 'PROVENANCE', 'VERIFIED', 'FAILED', 'OMITTED'] },
+  },
+  required: ['topic', 'sourceUnits', 'extracted', 'processed', 'represented', 'explained', 'provenance', 'status'],
+};
+
+// ── Handler: extractChunkIntelligence ────────────────────────────────────────
+
+interface BaseIdentityRequest {
+  materialId: string;
+  materialVersion: number;
+  processingRunId?: string;
+  sourceFingerprint?: string;
+}
+
+interface ExtractChunkRequest extends BaseIdentityRequest {
   materialText: string;
   materialTitle?: string;
 }
@@ -91,9 +171,12 @@ async function extractChunkIntelligence(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     throw { status: 400, message: 'Invalid payload' };
   }
-  const { materialText, materialTitle } = payload as ExtractChunkRequest;
+  const { materialText, materialTitle, materialId, materialVersion } = payload as ExtractChunkRequest;
   if (!materialText || typeof materialText !== 'string') {
     throw { status: 400, message: 'extractChunkIntelligence: materialText is required' };
+  }
+  if (!materialId || typeof materialVersion !== 'number') {
+    throw { status: 400, message: 'extractChunkIntelligence: Strict source identity (materialId, materialVersion) is required.' };
   }
 
   const ai = getClient();
@@ -145,39 +228,51 @@ async function extractChunkIntelligence(payload: unknown) {
         items: {
           type: Type.OBJECT,
           properties: {
-            idea: { type: Type.STRING },
-            explanation: { type: Type.STRING },
-            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } }
+            idea:             { type: Type.STRING },
+            explanation:      { type: Type.STRING },
+            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } },
           },
-          required: ['idea', 'explanation', 'sourceReferences']
-        }
+          required: ['idea', 'explanation', 'sourceReferences'],
+        },
       },
       importantResults: {
         type: Type.ARRAY,
         items: {
           type: Type.OBJECT,
           properties: {
-            result: { type: Type.STRING },
-            significance: { type: Type.STRING },
-            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } }
+            result:           { type: Type.STRING },
+            significance:     { type: Type.STRING },
+            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } },
           },
-          required: ['result', 'significance', 'sourceReferences']
-        }
+          required: ['result', 'significance', 'sourceReferences'],
+        },
+      },
+      formulas: {
+        type: Type.ARRAY,
+        items: formulaSchema,
       },
       groundedClaims: {
         type: Type.ARRAY,
         items: {
           type: Type.OBJECT,
           properties: {
-            claim: { type: Type.STRING },
-            type: { type: Type.STRING, enum: ['fact', 'interpretation', 'inference'] },
-            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } }
+            claim:            { type: Type.STRING },
+            type:             { type: Type.STRING, enum: ['fact', 'interpretation', 'inference'] },
+            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } },
           },
-          required: ['claim', 'type', 'sourceReferences']
-        }
-      }
+          required: ['claim', 'type', 'sourceReferences'],
+        },
+      },
+      visualLimitations: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+      },
+      tableNotes: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+      },
     },
-    required: ['concepts', 'relationships', 'keyTerms', 'keyIdeas', 'importantResults', 'groundedClaims'],
+    required: ['concepts', 'relationships', 'keyTerms', 'keyIdeas', 'importantResults', 'formulas', 'groundedClaims', 'visualLimitations', 'tableNotes'],
   };
 
   const prompt = `You are an expert educational AI analyzing a chunk of study material.
@@ -187,18 +282,25 @@ Material title: ${materialTitle || 'Untitled'}
 Chunk Content:
 ${trimmed}
 
-Extract the following intelligence, ensuring ALL items are grounded strictly in this chunk. DO NOT hallucinate external information.
-1. Key Concepts (important topics/entities, max 8)
-2. Relationships (how concepts relate)
-3. Key Terms (vocabulary definitions)
-4. Key Ideas (core themes/arguments/principles)
-5. Important Results (formulas, numerical results, conclusions)
-6. Grounded Claims (specific facts or inferences made in the text)
+Extract the following intelligence. ALL items must be grounded strictly in this chunk. DO NOT hallucinate external information.
 
-IMPORTANT PROVENANCE RULES:
-- Every concept, key idea, result, and claim MUST include "sourceReferences" that point exactly to the pages/slides explicitly mentioned in the chunk (e.g. ["Page 4"], ["Slide 12", "Slide 13"]).
-- DO NOT invent source references.
-- Distinguish between literal facts and inferences for claims.`;
+1. KEY CONCEPTS — Important topics/entities (no arbitrary cap — extract all significant ones)
+2. RELATIONSHIPS — How concepts relate to each other
+3. KEY TERMS — Vocabulary with precise definitions
+4. KEY IDEAS — Core themes, arguments, or principles
+5. IMPORTANT RESULTS — Formulas, numerical results, conclusions, empirical findings
+6. FORMULAS — Mathematical or logical equations. PRESERVE EXACT NOTATION.
+   - Expression must match the source exactly, e.g., "Y = −0.947 + 2.448X", "R² = 0.9995"
+   - List all variable definitions separately
+   - Never paraphrase: "a regression equation exists" is NOT acceptable
+7. GROUNDED CLAIMS — Specific facts (fact), interpretations (interpretation), or inferences (inference)
+8. VISUAL LIMITATIONS — Note any images, diagrams, charts, or visual-only content that could NOT be analyzed as text (e.g., "Figure on Page 3 could not be analyzed — image content")
+9. TABLE NOTES — If tables are present, note whether text was extractable. Use "TABLE_PRESENT_TEXT_UNAVAILABLE" if not.
+
+PROVENANCE RULES (strictly enforced):
+- Every concept, key idea, result, formula, and claim MUST include sourceReferences pointing to the page/slide explicitly mentioned in the chunk text (e.g., ["Page 4"], ["Slide 12", "Slide 13"])
+- DO NOT invent source references
+- Distinguish literal facts from interpretations and inferences`;
 
   const response = await ai.models.generateContent({
     model: MODEL,
@@ -212,74 +314,300 @@ IMPORTANT PROVENANCE RULES:
   return JSON.parse(response.text ?? '{}');
 }
 
-interface AggregateMaterialRequest {
+// ── Handler: discoverChunkTopics ─────────────────────────────────────────────
+
+interface DiscoverChunkTopicsRequest extends BaseIdentityRequest {
+  materialText: string;
+  materialTitle?: string;
+}
+
+async function discoverChunkTopics(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    throw { status: 400, message: 'Invalid payload' };
+  }
+  const { materialText, materialTitle, materialId, materialVersion } = payload as DiscoverChunkTopicsRequest;
+  if (!materialText || typeof materialText !== 'string') {
+    throw { status: 400, message: 'discoverChunkTopics: materialText is required' };
+  }
+  if (!materialId || typeof materialVersion !== 'number') {
+    throw { status: 400, message: 'discoverChunkTopics: Strict source identity is required.' };
+  }
+
+  const ai = getClient();
+  const trimmed = trimMaterial(materialText);
+
+  const schema = {
+    type: Type.OBJECT,
+    properties: {
+      localTopics: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            title:       { type: Type.STRING },
+            subtopics:   { type: Type.ARRAY, items: { type: Type.STRING } },
+            sourceUnits: { type: Type.ARRAY, items: { type: Type.STRING } },
+            importance:  { type: Type.STRING, enum: ['high', 'medium', 'low'] },
+          },
+          required: ['title', 'subtopics', 'sourceUnits', 'importance'],
+        },
+      },
+    },
+    required: ['localTopics'],
+  };
+
+  const prompt = `You are an educational AI extracting a strict structural topic outline from a material chunk.
+
+Material title: ${materialTitle || 'Untitled'}
+
+Chunk Content:
+${trimmed}
+
+Identify all major topics and subtopics discussed in this chunk.
+Do not extract detailed definitions or deep insights—only the topic structure (a hierarchical table of contents).
+
+RULES:
+- sourceUnits must reference exact pages/slides mentioned in the chunk.
+- Do not hallucinate topics.`;
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+    },
+  });
+
+  return JSON.parse(response.text ?? '{}');
+}
+
+// ── Handler: mergeTopicCandidates ────────────────────────────────────────────
+
+interface MergeTopicCandidatesRequest extends BaseIdentityRequest {
   materialTitle: string;
-  chunks: any[];
+  chunkTopics: any[];
+}
+
+async function mergeTopicCandidates(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    throw { status: 400, message: 'Invalid payload' };
+  }
+  const { materialTitle, chunkTopics, materialId, materialVersion } = payload as MergeTopicCandidatesRequest;
+  if (!chunkTopics || !Array.isArray(chunkTopics)) {
+    throw { status: 400, message: 'mergeTopicCandidates: chunkTopics array is required' };
+  }
+  if (!materialId || typeof materialVersion !== 'number') {
+    throw { status: 400, message: 'mergeTopicCandidates: Strict source identity is required.' };
+  }
+
+  const ai = getClient();
+  const payloadStr = JSON.stringify(chunkTopics);
+
+  const schema = {
+    type: Type.OBJECT,
+    properties: {
+      documentOutline: {
+        type: Type.ARRAY,
+        items: documentOutlineItemSchema,
+      },
+    },
+    required: ['documentOutline'],
+  };
+
+  const prompt = `You are an educational AI merging local topic discoveries into a single Document Topic Graph (Outline).
+
+Material title: ${materialTitle || 'Untitled'}
+
+Local Topic Candidates from Chunks:
+${payloadStr}
+
+TASK:
+Merge, deduplicate, and hierarchically organize these topics into a final, unified document outline.
+
+RULES:
+- Maintain strict order (chronological based on the chunks).
+- Merge identical or highly similar topics.
+- Combine sourceUnits accurately (e.g. if "Regression" is in Page 1 and Page 3, combine to ["Page 1", "Page 3"]).
+- Include all discovered valid topics.`;
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+    },
+  });
+
+  return JSON.parse(response.text ?? '{}');
+}
+
+// ── Handler: aggregateMaterial ────────────────────────────────────────────────
+
+interface AggregateMaterialRequest extends BaseIdentityRequest {
+  materialTitle: string;
+  chunks: any[];        // Full ChunkIntelligence objects
+  isPartial?: boolean;  // true if some chunks failed
 }
 
 async function aggregateMaterial(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     throw { status: 400, message: 'Invalid payload' };
   }
-  const { materialTitle, chunks } = payload as AggregateMaterialRequest;
-  
+  const { materialTitle, chunks, isPartial, materialId, materialVersion } = payload as AggregateMaterialRequest;
+
   if (!chunks || !Array.isArray(chunks)) {
     throw { status: 400, message: 'aggregateMaterial: chunks array is required' };
   }
-
-  // Authoritative Backend Limits
-  const MAX_CHUNKS = 50; 
-  if (chunks.length > MAX_CHUNKS) {
-    throw { status: 400, message: `aggregateMaterial: Too many chunks (${chunks.length}). Max allowed in single pass is ${MAX_CHUNKS}. Hierarchical aggregation required.` };
+  if (!materialId || typeof materialVersion !== 'number') {
+    throw { status: 400, message: 'aggregateMaterial: Strict source identity is required.' };
   }
-  
-  // Basic byte limit check (4MB for serverless safety)
+
+  if (chunks.length > MAX_CHUNKS_PER_AGGREGATION) {
+    throw { status: 400, message: `aggregateMaterial: Too many chunks (${chunks.length}). Max ${MAX_CHUNKS_PER_AGGREGATION} per pass. Use hierarchical aggregation.` };
+  }
+
   const payloadStr = JSON.stringify(chunks);
-  if (Buffer.byteLength(payloadStr, 'utf8') > 4_000_000) {
-    throw { status: 400, message: 'aggregateMaterial: Payload exceeds 4MB limit. Hierarchical aggregation required.' };
+  if (Buffer.byteLength(payloadStr, 'utf8') > MAX_AGGREGATION_BYTES) {
+    throw { status: 400, message: 'aggregateMaterial: Payload exceeds 4MB. Use hierarchical aggregation.' };
   }
 
   const ai = getClient();
-  const trimmedPayloadStr = payloadStr;
 
   const schema = {
     type: Type.OBJECT,
     properties: {
-      summary: { type: Type.STRING },
-      explanation: { type: Type.STRING },
+      summary:             { type: Type.STRING },
+      quickExplanation:    { type: Type.STRING },
+      detailedExplanation: { type: Type.STRING },
+      deepDive:            { type: Type.STRING },
+      documentOutline: {
+        type: Type.ARRAY,
+        items: documentOutlineItemSchema,
+      },
+      topicExplanations: {
+        type: Type.ARRAY,
+        items: topicExplanationSchema,
+      },
+      formulas: {
+        type: Type.ARRAY,
+        items: formulaSchema,
+      },
+      conclusions: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+      },
       sourceAwareInsights: {
         type: Type.ARRAY,
         items: {
           type: Type.OBJECT,
           properties: {
-            insight: { type: Type.STRING },
-            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } }
+            insight:          { type: Type.STRING },
+            sourceReferences: { type: Type.ARRAY, items: { type: Type.STRING } },
           },
-          required: ['insight', 'sourceReferences']
-        }
+          required: ['insight', 'sourceReferences'],
+        },
       },
       suggestedLearningPath: { type: Type.ARRAY, items: { type: Type.STRING } },
+      omissions: {
+        type: Type.ARRAY,
+        items: omissionSchema,
+      },
     },
-    required: ['summary', 'explanation', 'sourceAwareInsights', 'suggestedLearningPath'],
+    required: [
+      'summary', 'quickExplanation', 'detailedExplanation', 'deepDive',
+      'documentOutline', 'topicExplanations', 'formulas', 'conclusions',
+      'sourceAwareInsights', 'suggestedLearningPath', 'omissions',
+    ],
   };
 
-  const prompt = `You are an expert educational AI performing a global document synthesis.
+  const partialWarning = isPartial
+    ? '\n⚠️ NOTE: Some document chunks failed processing. This synthesis covers only the successfully processed portions. Flag any topics that appear incomplete in omissions.'
+    : '';
 
-Material title: ${materialTitle || 'Untitled'}
+  const prompt = `You are an expert educational AI performing a COMPLETE Document Intelligence Synthesis.
 
-You are provided with the aggregated intelligence from ${chunks.length} chunks of this document, containing concepts, key ideas, and results.
-Data:
-${trimmedPayloadStr}
+Material title: "${materialTitle || 'Untitled'}"
+Chunks provided: ${chunks.length}${partialWarning}
 
-Generate the following global document intelligence:
-1. A comprehensive Final Document Summary (2-4 paragraphs) that accurately reflects the entire document.
-2. A Student-Friendly Explanation (a narrative walkthrough of the material's core message).
-3. Source-Aware Insights (overall themes or advanced conclusions, citing the sources they span across).
-4. A suggested learning path (logical sequence of top concept names).
+You have received deep chunk-level intelligence from this document. Your task is to produce a COMPLETE Document Intelligence package that covers the ENTIRE document — not just the first or last chunk.
 
-IMPORTANT: 
-- Preserve the truth of the source. Do not hallucinate external knowledge.
-- Do not let the explanation or summary simply reflect the first chunk. Incorporate intelligence from across all provided chunks.`;
+═══════════════════════════════════════
+REQUIRED OUTPUT SECTIONS
+═══════════════════════════════════════
+
+1. SUMMARY (2–4 paragraphs)
+   - Accurately reflects the ENTIRE document, not just the beginning
+   - Must reference content from early, middle, AND late chunks
+
+2. QUICK EXPLANATION (Level 1 — 1 paragraph)
+   - What is this document about? (plain language, complete)
+
+3. DETAILED EXPLANATION (Level 2 — topic-by-topic narrative)
+   - One paragraph per major topic
+   - Must cover EVERY major topic found across ALL chunks
+   - Reference which source units each topic came from
+
+4. DEEP DIVE (Level 3 — full technical depth)
+   - Definitions with precise language from the source
+   - Mechanism/process explanations
+   - Formulas with variables defined
+   - Examples from the source
+   - Conditions, exceptions, limitations
+   - Do NOT oversimplify technical content
+
+5. DOCUMENT OUTLINE
+   - Ordered list of all major topics found
+   - Each topic must list its important subtopics
+   - sourceUnits must reference the actual pages/slides where this topic appears
+   - Example: "Regression Equation" → subtopics: ["Slope", "Intercept", "Y-intercept", "R²"] → sourceUnits: ["Page 6", "Page 7"]
+
+6. TOPIC-BY-TOPIC EXPLANATIONS
+   - For EVERY major topic in the document outline, produce:
+     - quickExplanation (1–2 sentences)
+     - detailedExplanation (full paragraph)
+     - deepDive (technical depth: definitions, formulas, examples, conditions)
+   - Include ALL discovered topics — do not arbitrarily limit to top-N
+
+7. FORMULAS
+   - Extract ALL mathematical/logical formulas from across all chunks
+   - PRESERVE EXACT NOTATION: "Y = −0.947 + 2.448X" not "a regression equation"
+   - Include ALL numerical constants (−0.947, 2.448, 25.98, 0.9995, etc.)
+   - Define every variable (e.g., "Y: predicted/dependent variable", "X: independent variable")
+   - sourceReferences must point to the exact page/slide
+
+8. CONCLUSIONS
+   - What are the major findings, conclusions, or takeaways from the document?
+
+9. SOURCE-AWARE INSIGHTS
+   - Advanced cross-chunk themes or conclusions
+   - Must cite which source units they span
+
+10. SUGGESTED LEARNING PATH
+    - Logical sequence of concept names for a learner to follow
+
+11. OMISSIONS
+    - Document EVERY piece of information that could NOT be fully analyzed
+    - Include: visual content, tables with unextractable text, failed chunks, OCR limitations
+    - Never claim complete understanding if limitations exist
+
+═══════════════════════════════════════
+CRITICAL RULES — VIOLATIONS ARE FAILURES
+═══════════════════════════════════════
+
+❌ Do NOT bias toward chunk 1 (first-page bias). Incorporate ALL chunks.
+❌ Do NOT simplify formulas away — preserve exact notation
+❌ Do NOT drop topics discovered in later chunks
+❌ Do NOT hallucinate information not in the chunks
+❌ Do NOT claim understanding of visual content that was flagged as unavailable
+❌ Do NOT produce a "global summary" that ignores individual topic-level intelligence
+✅ EVERY major topic in documentOutline MUST have a corresponding entry in topicExplanations
+✅ EVERY formula found in chunks MUST appear in the formulas array
+✅ Source references must be grounded to actual page/slide numbers from the chunk intelligence
+
+Chunk Intelligence Data:
+${payloadStr}`;
 
   const response = await ai.models.generateContent({
     model: MODEL,
@@ -293,7 +621,194 @@ IMPORTANT:
   return JSON.parse(response.text ?? '{}');
 }
 
-interface AnalyzeExplanationRequest {
+// ── Handler: auditCompleteness ────────────────────────────────────────────────
+
+interface AuditCompletenessRequest extends BaseIdentityRequest {
+  materialTitle: string;
+  documentOutline: any[];
+  topicExplanations: any[];
+  formulas: any[];
+  importantResults: any[];
+}
+
+async function auditCompleteness(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    throw { status: 400, message: 'Invalid payload' };
+  }
+  const { materialTitle, documentOutline, topicExplanations, formulas, importantResults, materialId, materialVersion } = payload as AuditCompletenessRequest;
+
+  if (!documentOutline || !Array.isArray(documentOutline)) {
+    throw { status: 400, message: 'auditCompleteness: documentOutline array is required' };
+  }
+  if (!materialId || typeof materialVersion !== 'number') {
+    throw { status: 400, message: 'auditCompleteness: Strict source identity is required.' };
+  }
+
+  const ai = getClient();
+
+  const schema = {
+    type: Type.OBJECT,
+    properties: {
+      overallPassed: { type: Type.BOOLEAN },
+      coverageMatrix: {
+        type: Type.ARRAY,
+        items: coverageEntrySchema,
+      },
+      missingTopics: { type: Type.ARRAY, items: { type: Type.STRING } },
+      missingSubtopics: { type: Type.ARRAY, items: { type: Type.STRING } },
+      missingFormulas: { type: Type.ARRAY, items: { type: Type.STRING } },
+      recommendations: { type: Type.ARRAY, items: { type: Type.STRING } },
+      auditSummary: { type: Type.STRING },
+    },
+    required: ['overallPassed', 'coverageMatrix', 'missingTopics', 'missingSubtopics', 'missingFormulas', 'recommendations', 'auditSummary'],
+  };
+
+  const prompt = `You are a strict Document Completeness Auditor for an educational AI system.
+
+Material: "${materialTitle}"
+
+DOCUMENT OUTLINE (what the source contains — authoritative):
+${JSON.stringify(documentOutline, null, 2)}
+
+SYNTHESIZED TOPIC EXPLANATIONS (what was actually represented):
+${JSON.stringify(topicExplanations, null, 2)}
+
+SYNTHESIZED FORMULAS (what was captured):
+${JSON.stringify(formulas, null, 2)}
+
+IMPORTANT RESULTS FROM CHUNKS:
+${JSON.stringify(importantResults?.slice(0, 20) ?? [], null, 2)}
+
+═══════════════════════════════════════
+AUDIT TASK
+═══════════════════════════════════════
+
+Compare the DOCUMENT OUTLINE (authoritative source of what exists) against the SYNTHESIZED INTELLIGENCE (what was actually represented).
+
+For EACH topic and subtopic in the document outline:
+1. Check if it has a corresponding entry in topicExplanations
+2. Check if its subtopics are mentioned in the explanation
+3. Check if associated formulas are captured (if any were expected)
+4. Assign a coverage status
+
+COVERAGE STATUS VALUES:
+- VERIFIED: Topic + subtopics + formulas all represented with provenance
+- PROCESSED: Topic represented but subtopics incomplete or shallow
+- PARTIALLY_COVERED: Topic mentioned but explanation is insufficient
+- DISCOVERED: Topic found in outline but missing from explanations
+- OMITTED: Topic completely absent from synthesized intelligence
+
+The audit PASSES (overallPassed: true) only if:
+- All HIGH importance topics are VERIFIED or PROCESSED
+- No HIGH importance subtopics are DISCOVERED or OMITTED
+- All formulas discovered in the outline are present in synthesized formulas
+
+If missingTopics is non-empty, list the EXACT topic names as they appear in the outline.
+If missingFormulas is non-empty, list what was expected but not found.
+
+Be rigorous. Do not be lenient.`;
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+    },
+  });
+
+  return JSON.parse(response.text ?? '{}');
+}
+
+// ── Handler: recoverMissingTopics ─────────────────────────────────────────────
+
+interface RecoverMissingTopicsRequest extends BaseIdentityRequest {
+  materialTitle: string;
+  missingTopics: string[];
+  relevantChunks: any[];  // Chunks that are likely to contain the missing topics
+}
+
+async function recoverMissingTopics(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    throw { status: 400, message: 'Invalid payload' };
+  }
+  const { materialTitle, missingTopics, relevantChunks, materialId, materialVersion } = payload as RecoverMissingTopicsRequest;
+
+  if (!missingTopics || missingTopics.length === 0) {
+    throw { status: 400, message: 'recoverMissingTopics: missingTopics array is required' };
+  }
+  if (!relevantChunks || !Array.isArray(relevantChunks) || relevantChunks.length === 0) {
+    throw { status: 400, message: 'recoverMissingTopics: relevantChunks array is required' };
+  }
+  if (!materialId || typeof materialVersion !== 'number') {
+    throw { status: 400, message: 'recoverMissingTopics: Strict source identity is required.' };
+  }
+
+  const ai = getClient();
+
+  const schema = {
+    type: Type.OBJECT,
+    properties: {
+      recoveredTopicExplanations: {
+        type: Type.ARRAY,
+        items: topicExplanationSchema,
+      },
+      recoveredFormulas: {
+        type: Type.ARRAY,
+        items: formulaSchema,
+      },
+      recoveryStatus: { type: Type.STRING, enum: ['full', 'partial', 'failed'] },
+      unrecoverableTopics: { type: Type.ARRAY, items: { type: Type.STRING } },
+      recoveryNotes: { type: Type.STRING },
+    },
+    required: ['recoveredTopicExplanations', 'recoveredFormulas', 'recoveryStatus', 'unrecoverableTopics', 'recoveryNotes'],
+  };
+
+  const prompt = `You are performing targeted gap recovery for a document intelligence system.
+
+Material: "${materialTitle}"
+
+MISSING TOPICS (these were NOT adequately represented in the initial synthesis):
+${missingTopics.map((t, i) => `${i + 1}. "${t}"`).join('\n')}
+
+RELEVANT SOURCE CHUNK INTELLIGENCE (these chunks likely contain the missing topics):
+${JSON.stringify(relevantChunks, null, 2)}
+
+═══════════════════════════════════════
+RECOVERY TASK
+═══════════════════════════════════════
+
+For EACH missing topic, search the chunk intelligence and produce:
+1. A COMPLETE TopicExplanation (quickExplanation, detailedExplanation, deepDive)
+2. Any formulas associated with this topic (EXACT notation)
+
+RULES:
+- Only recover information that is ACTUALLY in the chunk intelligence provided
+- If a missing topic is genuinely not in the chunk intelligence: add to unrecoverableTopics
+- Preserve EXACT formula notation (Y = −0.947 + 2.448X, not paraphrased)
+- Include precise source references from the chunks
+- Do NOT hallucinate information not present in the chunks
+
+Recovery Status:
+- "full" = all missing topics recovered
+- "partial" = some recovered, some unrecoverable
+- "failed" = no missing topics could be recovered from these chunks`;
+
+  const response = await ai.models.generateContent({
+    model: MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: schema,
+    },
+  });
+
+  return JSON.parse(response.text ?? '{}');
+}
+
+// ── Handler: analyzeExplanation ───────────────────────────────────────────────
+
+interface AnalyzeExplanationRequest extends BaseIdentityRequest {
   session: {
     topicId: string;
     [key: string]: any;
@@ -307,7 +822,7 @@ async function analyzeExplanation(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     throw { status: 400, message: 'Invalid payload' };
   }
-  const { session, explanation, topicName, materialContext } = payload as AnalyzeExplanationRequest;
+  const { session, explanation, topicName, materialContext, materialId, materialVersion } = payload as AnalyzeExplanationRequest;
   if (!explanation || typeof explanation !== 'string') {
     throw { status: 400, message: 'analyzeExplanation: explanation is required and must be a string' };
   }
@@ -317,16 +832,17 @@ async function analyzeExplanation(payload: unknown) {
   if (!session.topicId || typeof session.topicId !== 'string') {
     throw { status: 400, message: 'analyzeExplanation: session.topicId is required and must be a string' };
   }
+  if (!materialId || typeof materialVersion !== 'number') {
+    throw { status: 400, message: 'analyzeExplanation: Strict source identity is required.' };
+  }
 
   const ai = getClient();
   const trimmedExplanation = trimExplanation(explanation);
-  
-  // Authoritative Context Check: Reject unbounded context
-  const maxContextBytes = 40_000;
+
   let validatedContext = materialContext ?? '';
-  if (Buffer.byteLength(validatedContext, 'utf8') > maxContextBytes) {
-    validatedContext = validatedContext.slice(0, maxContextBytes);
-    console.warn(`[api/ai] analyzeExplanation: Context exceeded ${maxContextBytes} bytes and was truncated to prevent hallucination/overloading. Frontend must use context budget.`);
+  if (Buffer.byteLength(validatedContext, 'utf8') > MAX_CONTEXT_BYTES) {
+    validatedContext = validatedContext.slice(0, MAX_CONTEXT_BYTES);
+    console.warn(`[api/ai] analyzeExplanation: Context truncated to ${MAX_CONTEXT_BYTES} bytes.`);
   }
 
   const topic = topicName ?? session.topicId;
@@ -342,23 +858,22 @@ The student's explanation:
 "${trimmedExplanation}"
 
 Evaluate this explanation carefully:
-1. Identify which key concepts from the topic the student correctly demonstrated understanding of (studentEvidence)
-2. Identify what evidence you expected to see for each key concept (expectedEvidence)  
+1. Identify which key concepts the student correctly demonstrated (studentEvidence)
+2. Identify what evidence you expected to see for each key concept (expectedEvidence)
 3. Identify what is missing from their explanation (missingEvidence)
 4. Detect any misconceptions — incorrect statements or confused relationships
-5. Assign an overall status based on the quality of the actual explanation
+5. Assign an overall status based on quality of the actual explanation
 
 CRITICAL RULES:
-- GROUNDING: Base your evaluation STRICTLY on the provided "Relevant material context". Do NOT invent facts or rely on outside knowledge. If the provided context is insufficient to evaluate a point, return "Insufficient source evidence to confidently evaluate this point." rather than hallucinating an answer.
-- Base studentEvidence ONLY on what the student actually said. Do NOT add evidence they did not demonstrate.
-- If the student's explanation contains errors, classify those as potential_misconception, NOT mastered.
-- The status must reflect actual understanding, not just that they tried.
-- masteryIndex scores must be calculated honestly from the evidence:
+- GROUNDING: Base evaluation STRICTLY on the "Relevant material context". Do NOT invent facts or rely on outside knowledge. If insufficient context: return "Insufficient source evidence to evaluate this point."
+- Base studentEvidence ONLY on what the student actually said
+- If student's explanation contains errors: classify as potential_misconception, NOT mastered
+- masteryIndex scores must be calculated honestly:
   - conceptCoverage (0–35): how many key concepts were correctly addressed
-  - explanationQuality (0–25): clarity and accuracy of the explanation
+  - explanationQuality (0–25): clarity and accuracy
   - followupPerformance (0–20): set to 10 as baseline (no followup yet)
-  - consistency (0–20): internal consistency of the explanation
-  - total = sum of the above (0–100)`;
+  - consistency (0–20): internal consistency
+  - total = sum (0–100)`;
 
   const response = await ai.models.generateContent({
     model: MODEL,
@@ -372,7 +887,9 @@ CRITICAL RULES:
   return JSON.parse(response.text ?? '{}');
 }
 
-interface GenerateFollowUpRequest {
+// ── Handler: generateFollowUpQuestion ────────────────────────────────────────
+
+interface GenerateFollowUpRequest extends BaseIdentityRequest {
   analysis: {
     topic: string;
     concepts?: any[];
@@ -385,14 +902,16 @@ async function generateFollowUpQuestion(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     throw { status: 400, message: 'Invalid payload' };
   }
-  const { analysis } = payload as GenerateFollowUpRequest;
+  const { analysis, materialId, materialVersion } = payload as GenerateFollowUpRequest;
   if (!analysis || typeof analysis !== 'object' || !analysis.topic) {
     throw { status: 400, message: 'generateFollowUpQuestion: valid analysis object with a topic is required' };
+  }
+  if (!materialId || typeof materialVersion !== 'number') {
+    throw { status: 400, message: 'generateFollowUpQuestion: Strict source identity is required.' };
   }
 
   const ai = getClient();
 
-  // Find the weakest concept to target
   const weakConcepts = (analysis.concepts ?? []).filter(
     (c: any) => c.status === 'potential_misconception' || c.status === 'partial' || c.status === 'weak'
   );
@@ -402,9 +921,9 @@ async function generateFollowUpQuestion(payload: unknown) {
   const schema = {
     type: Type.OBJECT,
     properties: {
-      question:       { type: Type.STRING },
-      rationale:      { type: Type.STRING },
-      targetConcept:  { type: Type.STRING },
+      question:      { type: Type.STRING },
+      rationale:     { type: Type.STRING },
+      targetConcept: { type: Type.STRING },
     },
     required: ['question', 'rationale', 'targetConcept'],
   };
@@ -436,7 +955,9 @@ The question must be directly about ${analysis.topic} and ${targetConcept.concep
   return JSON.parse(response.text ?? '{}');
 }
 
-interface GenerateRepairRequest {
+// ── Handler: generateRepair ───────────────────────────────────────────────────
+
+interface GenerateRepairRequest extends BaseIdentityRequest {
   analysis: {
     topic: string;
     concepts?: any[];
@@ -449,9 +970,12 @@ async function generateRepair(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     throw { status: 400, message: 'Invalid payload' };
   }
-  const { analysis } = payload as GenerateRepairRequest;
+  const { analysis, materialId, materialVersion } = payload as GenerateRepairRequest;
   if (!analysis || typeof analysis !== 'object' || !analysis.topic) {
     throw { status: 400, message: 'generateRepair: valid analysis object with a topic is required' };
+  }
+  if (!materialId || typeof materialVersion !== 'number') {
+    throw { status: 400, message: 'generateRepair: Strict source identity is required.' };
   }
 
   const ai = getClient();
@@ -497,9 +1021,9 @@ Create repair content that:
 2. Uses 3–5 clear steps (mix of explanation, visual, analogy, challenge types)
 3. Includes a simple ASCII diagram or visual representation where appropriate
 4. Ends with a challenge question to verify understanding
-5. Is completely specific to "${analysis.topic}" — no TCP/networking references unless the topic is networking
+5. Is completely specific to "${analysis.topic}" — no unrelated topic references
 
-The repair must target the EXACT weakness identified, not generic content about the topic.`;
+The repair must target the EXACT weakness identified, not generic content.`;
 
   const response = await ai.models.generateContent({
     model: MODEL,
@@ -513,7 +1037,9 @@ The repair must target the EXACT weakness identified, not generic content about 
   return JSON.parse(response.text ?? '{}');
 }
 
-interface EvaluateReExplanationRequest {
+// ── Handler: evaluateReExplanation ────────────────────────────────────────────
+
+interface EvaluateReExplanationRequest extends BaseIdentityRequest {
   session: {
     topicId: string;
     topic?: string;
@@ -528,12 +1054,15 @@ async function evaluateReExplanation(payload: unknown) {
   if (!payload || typeof payload !== 'object') {
     throw { status: 400, message: 'Invalid payload' };
   }
-  const { session, reExplanation } = payload as EvaluateReExplanationRequest;
+  const { session, reExplanation, materialId, materialVersion } = payload as EvaluateReExplanationRequest;
   if (!reExplanation || typeof reExplanation !== 'string') {
     throw { status: 400, message: 'evaluateReExplanation: reExplanation is required and must be a string' };
   }
   if (!session || typeof session !== 'object') {
     throw { status: 400, message: 'evaluateReExplanation: session object is required' };
+  }
+  if (!materialId || typeof materialVersion !== 'number') {
+    throw { status: 400, message: 'evaluateReExplanation: Strict source identity is required.' };
   }
 
   const ai = getClient();
@@ -560,8 +1089,8 @@ Evaluate this revised explanation:
 3. Has understanding meaningfully improved?
 
 Apply the same rigorous evidence-based evaluation as before.
-Update masteryIndex to reflect the improvement (or lack thereof) compared to the previous attempt.
-If the student addressed the previous gaps, conceptCoverage and explanationQuality should increase.
+Update masteryIndex to reflect improvement (or lack thereof) compared to the previous attempt.
+If the student addressed previous gaps, conceptCoverage and explanationQuality should increase.
 If the student repeated the same errors, scores should not increase significantly.`;
 
   const response = await ai.models.generateContent({
@@ -580,8 +1109,12 @@ If the student repeated the same errors, scores should not increase significantl
 type Handler = (payload: any) => Promise<any>;
 
 const HANDLERS: Record<string, Handler> = {
+  discoverChunkTopics,
+  mergeTopicCandidates,
   extractChunkIntelligence,
   aggregateMaterial,
+  auditCompleteness,
+  recoverMissingTopics,
   analyzeExplanation,
   generateFollowUpQuestion,
   generateRepair,
@@ -590,7 +1123,6 @@ const HANDLERS: Record<string, Handler> = {
 
 // ── Vercel Serverless entry point ─────────────────────────────────────────────
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS for local dev
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -600,33 +1132,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed' } });
   }
 
   let body: { method?: string; payload?: any };
   try {
     body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
   } catch {
-    return res.status(400).json({ error: 'Invalid JSON body' });
+    return res.status(400).json({ error: { code: 'INVALID_REQUEST', message: 'Invalid JSON body' } });
   }
 
   const { method, payload } = body ?? {};
 
   if (!method || typeof method !== 'string') {
-    return res.status(400).json({ error: 'Missing method in request body' });
+    return res.status(400).json({ error: { code: 'INVALID_REQUEST', message: 'Missing method in request body' } });
   }
 
   const handle = HANDLERS[method];
   if (!handle) {
-    return res.status(404).json({ error: `Unknown method: ${method}` });
+    return res.status(404).json({ error: { code: 'UNKNOWN_METHOD', message: `Unknown method: ${method}` } });
   }
 
   try {
     const result = await Promise.race([
       handle(payload ?? {}),
-      new Promise((_, reject) => 
-        setTimeout(() => reject({ status: 504, code: 'AI_PROVIDER_UNAVAILABLE', message: 'Provider timeout exceeded' }), 30000)
-      )
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject({ status: 504, code: 'AI_PROVIDER_TIMEOUT', message: 'Provider timeout exceeded' }),
+          55000
+        )
+      ),
     ]);
     return res.status(200).json(result);
   } catch (err: any) {
@@ -636,12 +1171,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (err && (err.status === 503 || err.status === 504)) {
-      return res.status(err.status).json({ error: { code: 'AI_PROVIDER_UNAVAILABLE', message: err.message } });
+      return res.status(err.status).json({ error: { code: err.code || 'AI_PROVIDER_UNAVAILABLE', message: err.message } });
     }
 
     const msg: string = err?.message ?? 'Internal API processing failed';
     const isConfig = msg.includes('GEMINI_API_KEY');
-    
+
     if (isConfig) {
       return res.status(503).json({ error: { code: 'AI_PROVIDER_UNAVAILABLE', message: 'AI service is not configured' } });
     }
@@ -654,8 +1189,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           message: msg,
           provider: 'LIVE',
           model: MODEL,
-          operation: method
-        }
+          operation: method,
+        },
       });
     }
 
@@ -663,8 +1198,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({
       error: {
         code: 'INTERNAL_API_ERROR',
-        message: msg
-      }
+        message: msg,
+      },
     });
   }
 }
