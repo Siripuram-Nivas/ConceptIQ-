@@ -298,8 +298,8 @@ export class ClientRequestScheduler {
       if (this.onJobComplete) this.onJobComplete(job, result);
 
     } catch (err: any) {
-      const isRateLimited = err?.code === 'RATE_LIMITED';
-      const isRetryable = err?.isRetryable;
+      const isRateLimited = err?.code === 'RATE_LIMITED' || err?.code === 'AI_PROVIDER_UNAVAILABLE' || err?.code === 'AI_PROVIDER_TIMEOUT';
+      const isRetryable = err?.isRetryable || isRateLimited;
       
       const jobs = await this.getJobs();
       const j = jobs.find(x => x.jobId === job.jobId);

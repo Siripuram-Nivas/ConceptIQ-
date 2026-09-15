@@ -63,14 +63,42 @@ export function MaterialOverviewPage() {
   const processingStatus = currentMaterial.processingStatus as string;
 
   if (processingStatus === 'processing') {
+    const m = currentMaterial.manifest;
+    const completed = m?.completedChunks ?? 0;
+    const total = m?.totalChunks ?? 0;
+    const failed = m?.failedChunks ?? 0;
+    const retrying = total > 0 ? Math.max(0, total - completed - failed) : 0;
+    const showStats = total > 0;
+
     return (
       <div className="min-h-screen bg-bg flex flex-col items-center justify-center px-5">
-        <div className="text-center space-y-4">
+        <div className="text-center space-y-6 max-w-lg">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-ai/10 mb-4">
             <Zap size={24} className="text-ai animate-pulse" />
           </div>
           <h2 className="font-display font-bold text-display-md text-fg">Extracting Document Intelligence...</h2>
           <p className="text-muted text-sm max-w-md mx-auto">ConceptIQ is performing a deep semantic extraction of your document. This goes beyond simple search—we are building a full canonical outline, identifying key formulas, detecting missing context, and generating pedagogical recovery paths.</p>
+          
+          {showStats && (
+            <div className="mt-8">
+              <div className="grid grid-cols-3 gap-4 my-4">
+                <div className="bg-surface rounded-lg p-4">
+                  <div className="text-2xl font-bold text-green-400">{completed}</div>
+                  <div className="text-xs text-muted mt-1">Processed</div>
+                </div>
+                <div className="bg-surface rounded-lg p-4">
+                  <div className="text-2xl font-bold text-ai animate-pulse">{retrying}</div>
+                  <div className="text-xs text-muted mt-1">Extracting</div>
+                </div>
+                <div className="bg-surface rounded-lg p-4">
+                  <div className="text-2xl font-bold text-red-400">{failed}</div>
+                  <div className="text-xs text-muted mt-1">Failed</div>
+                </div>
+              </div>
+              <p className="text-xs text-muted">Total: {completed} / {total} chunks processed</p>
+            </div>
+          )}
+
           {isDemoMode && <DemoModeIndicator />}
         </div>
       </div>
