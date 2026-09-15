@@ -327,7 +327,9 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
           console.error('Material processing failed:', error);
           const errMsg = error instanceof Error ? error.message : 'Processing failed';
           // Determine if this is a rate-limit-induced pause or a true failure
-          const isRateLimitPause = errMsg.includes('RATE_LIMIT_RETRY_EXHAUSTED') || errMsg.includes('PROCESSING_PAUSED');
+          const isRateLimitPause = errMsg.includes('RATE_LIMIT_RETRY_EXHAUSTED')
+            || errMsg.includes('PROCESSING_PAUSED')
+            || errMsg.includes('SCHEDULER_LEASE_CONFLICT');
           set((state) => ({
             materials: state.materials.map((m) =>
               m.id === materialId

@@ -406,7 +406,7 @@ export class MaterialProcessor {
       sourceFingerprint,
       materialVersion: 1,
       promptVersion: '2.0',
-      modelVersion: 'gemini-3.6-flash',
+      modelVersion: 'backend-controlled', // actual model is set server-side; do not hardcode
       schemaVersion: '2.0',
       processorVersion: '2.1',
       sourceExtractionStatus: 'succeeded',
