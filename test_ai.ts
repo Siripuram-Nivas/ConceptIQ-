@@ -9,15 +9,15 @@ async function run() {
   } as LearningSession;
 
   console.log("--- INPUT A ---");
-  const resA = await provider.analyzeExplanation(dummySession, "TCP uses SYN, SYN-ACK and ACK to establish a connection.");
+  const resA = await provider.analyzeExplanation(dummySession, "TCP uses SYN, SYN-ACK and ACK to establish a connection.", "");
   console.log(JSON.stringify(resA, null, 2));
 
   console.log("--- INPUT B ---");
-  const resB = await provider.analyzeExplanation(dummySession, "TCP is a protocol for storing database records.");
+  const resB = await provider.analyzeExplanation(dummySession, "TCP is a protocol for storing database records.", "");
   console.log(JSON.stringify(resB, null, 2));
 
   console.log("--- INPUT C ---");
-  const resC = await provider.analyzeExplanation(dummySession, "TCP uses DNS to translate domain names.");
+  const resC = await provider.analyzeExplanation(dummySession, "TCP uses DNS to translate domain names.", "");
   console.log(JSON.stringify(resC, null, 2));
 }
 
