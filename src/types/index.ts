@@ -14,7 +14,7 @@ export type ConceptStatus = 'mastered' | 'strong' | 'partial' | 'weak' | 'potent
 
 // 'partial' = some chunks failed, intelligence is incomplete but persisted
 // 'text_complete' = all text processed; visual/OCR content was not analyzed
-export type MaterialStatus = 'idle' | 'processing' | 'ready' | 'failed' | 'partial' | 'text_complete';
+export type MaterialStatus = 'idle' | 'processing' | 'ready' | 'failed' | 'partial' | 'text_complete' | 'rate_limited' | 'paused';
 
 export interface ConceptEvidence {
   concept: string;

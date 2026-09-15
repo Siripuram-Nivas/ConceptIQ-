@@ -189,18 +189,24 @@ export function AddMaterialPage() {
 
             {/* ERROR STATE */}
             {stage === 'error' && (
-              <div className="editorial-card p-8 glass-panel mb-10 flex items-start gap-6 border border-accent-red/40">
-                <AlertTriangle className="text-accent-red flex-shrink-0 mt-1" size={28} />
+              <div className={`editorial-card p-8 glass-panel mb-10 flex items-start gap-6 border ${errorMessage?.includes('RATE_LIMIT') ? 'border-accent-yellow/40' : 'border-accent-red/40'}`}>
+                <AlertTriangle className={errorMessage?.includes('RATE_LIMIT') ? 'text-accent-yellow flex-shrink-0 mt-1' : 'text-accent-red flex-shrink-0 mt-1'} size={28} />
                 <div className="flex-1">
                   <p className="font-display text-2xl font-bold text-fg mb-1">
-                    Couldn't process that file.
+                    {errorMessage?.includes('RATE_LIMIT_RETRY_EXHAUSTED') ? 'AI SERVICE RATE LIMITED' : 'Couldn\'t process that file.'}
                   </p>
-                  <p className="text-fg/80 text-sm font-medium mb-4">{errorMessage}</p>
-                  <p className="text-muted text-xs mb-4">
-                    Try exporting the presentation again as .pptx, or upload a PDF/TXT version.
+                  <p className="text-fg/80 text-sm font-medium mb-4">
+                    {errorMessage?.includes('RATE_LIMIT_RETRY_EXHAUSTED') ? errorMessage.replace('Error: RATE_LIMIT_RETRY_EXHAUSTED: AI SERVICE RATE LIMITED.', '').trim() : errorMessage}
                   </p>
+                  
+                  {!errorMessage?.includes('RATE_LIMIT') && (
+                    <p className="text-muted text-xs mb-4">
+                      Try exporting the presentation again as .pptx, or upload a PDF/TXT version.
+                    </p>
+                  )}
+                  
                   <button onClick={resetError} className="editorial-btn-outline text-sm">
-                    Try Again
+                    {errorMessage?.includes('RATE_LIMIT') ? 'Resume Processing' : 'Try Again'}
                   </button>
                 </div>
               </div>

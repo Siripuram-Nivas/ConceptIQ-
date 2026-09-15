@@ -25,65 +25,55 @@ function loadEnv() {
 }
 loadEnv();
 
+let requestCount = 0;
 const globalFetch = global.fetch;
 global.fetch = async (url, options) => {
   if (typeof url === 'string' && url.startsWith('/api/ai')) {
     const body = JSON.parse(options.body);
     const method = body.method;
+    
+    await new Promise(r => setTimeout(r, 50));
+    requestCount++;
 
-    // Simulate network delay
-    await new Promise(r => setTimeout(r, 100));
-
-    // KILL CRITIC: Simulate a failure on the second chunk extraction request
     if (method === 'extractChunkIntelligence') {
+      // All-429 Kill Test: the first 2 chunk requests fail with 429
+      if (requestCount <= 2) {
+        console.log(`💥 KILL CRITIC: Simulating 429 Rate Limit on request ${requestCount}`);
+        return new Response(JSON.stringify({ 
+           error: { code: 'RATE_LIMITED', message: 'Quota exceeded', isRetryable: true, retryAfterMs: 1000 } 
+        }), { status: 429, headers: { 'Content-Type': 'application/json' } });
+      }
+
+      // Response-Loss scenario: chunk 2 fails with 503 permanently
       if (body.payload.materialText.includes('Page 2') || body.payload.materialText.includes('PAGE 2')) {
-        console.log('💥 KILL CRITIC: Simulating fatal chunk failure on chunk containing Page 2');
+        console.log('💥 KILL CRITIC: Simulating fatal chunk failure on Chunk 2');
         return new Response(JSON.stringify({ error: { message: 'Simulated chunk crash' } }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' },
+          status: 503, headers: { 'Content-Type': 'application/json' },
         });
       }
+
       return new Response(JSON.stringify({
         concepts: [{ name: 'Test Concept', explanation: 'Mocked.' }],
-        keyTerms: [],
-        keyIdeas: [],
-        importantResults: [],
-        relationships: [],
-        formulas: [],
-        visualLimitations: [],
-        tableNotes: [],
+        keyTerms: [], keyIdeas: [], importantResults: [], relationships: [], formulas: [], visualLimitations: [], tableNotes: [],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
 
     if (method === 'discoverChunkTopics') {
-      return new Response(JSON.stringify({
-        localTopics: [{ title: 'Mock Topic', importance: 'high' }]
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ localTopics: [{ title: 'Mock Topic', importance: 'high' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
-
     if (method === 'mergeTopicCandidates') {
-      return new Response(JSON.stringify({
-        documentOutline: [{ title: 'Mock Topic', level: 1, confidence: 0.9, sourceNodes: [] }]
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ documentOutline: [{ title: 'Mock Topic', level: 1, confidence: 0.9, sourceNodes: [] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
-
     if (method === 'aggregateMaterial') {
-      return new Response(JSON.stringify({
-        topicExplanations: [{ topic: 'Mock Topic', explanation: 'Mocked.', sourceChunks: [] }],
-        relationships: [],
-        formulas: [],
-        documentOutline: [{ title: 'Mock Topic', level: 1, confidence: 0.9, sourceNodes: [] }]
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ topicExplanations: [{ topic: 'Mock Topic', explanation: 'Mocked.', sourceChunks: [] }], relationships: [], formulas: [], documentOutline: [{ title: 'Mock Topic', level: 1, confidence: 0.9, sourceNodes: [] }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
-
     if (method === 'auditCompleteness') {
-      return new Response(JSON.stringify({
-        coverageMatrix: [],
-        omissions: [{ topic: 'Page 2 content', reason: 'extraction_failed', severity: 'high', recoverable: true }],
-        isComplete: false
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ coverageMatrix: [], omissions: [{ topic: 'Page 2 content', reason: 'extraction_failed', severity: 'high', recoverable: true }], isComplete: false }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
-
+    if (method === 'recoverMissingTopics') {
+      return new Response(JSON.stringify({ recoveredExplanations: [], recoveredConcepts: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    
     return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
   return globalFetch(url, options);
@@ -115,7 +105,7 @@ ${' even more filler text to force the final chunk on page 3. '.repeat(200)}
     console.log('⏳ Processing material (simulating network failure on chunk 2)...');
     const result = await processor.processText(testContent, 'tcp-handshake.txt', {
       materialId: 'test-kill-critic',
-      onProgress: (manifest) => {
+      onProgress: (manifest, chunkIntelligences) => {
         console.log(`[Progress] Chunk Processing: ${manifest.chunkProcessingStatus}, Completed: ${manifest.completedChunks}, Failed: ${manifest.failedChunks}`);
       }
     });
@@ -123,10 +113,10 @@ ${' even more filler text to force the final chunk on page 3. '.repeat(200)}
     console.log('\n✅ Kill-Critic Test Complete!');
     console.log(`- Final Aggregation Status: ${result.manifest.aggregationStatus}`);
     console.log(`- Partial Flag: ${result.manifest.isPartial}`);
-    console.log(`- Omissions Recoverable: ${result.processed.omissions.some(o => o.recoverable)}`);
-    console.log(`- Omissions Count: ${result.processed.omissions.length}`);
+    console.log(`- Completed Chunks: ${result.manifest.completedChunks}`);
+    console.log(`- Failed Chunks: ${result.manifest.failedChunks}`);
     
-    if (result.manifest.isPartial && result.manifest.aggregationStatus !== 'failed') {
+    if (result.manifest.isPartial && result.manifest.aggregationStatus !== 'failed' && result.manifest.completedChunks > 0) {
       console.log('\n🔥 SUCCESS: Architecture survived targeted chunk failure and built partial intelligence!');
       process.exit(0);
     } else {

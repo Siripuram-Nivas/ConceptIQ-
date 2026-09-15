@@ -9,7 +9,10 @@ const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3.6-flash';
 function getClient(): GoogleGenAI {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('GEMINI_API_KEY is not configured on the server.');
-  return new GoogleGenAI({ apiKey: key });
+  return new GoogleGenAI({ 
+    apiKey: key,
+    httpOptions: { retryOptions: { attempts: 1 } } // Disable internal SDK retries
+  });
 }
 
 // ── Backend Safety Limits (enforced server-side) ───────────────────────────
@@ -1121,6 +1124,104 @@ const HANDLERS: Record<string, Handler> = {
   evaluateReExplanation,
 };
 
+type NormalizedApiError = {
+  code:
+    | "RATE_LIMITED"
+    | "AI_PROVIDER_UNAVAILABLE"
+    | "AI_PROVIDER_TIMEOUT"
+    | "INVALID_REQUEST"
+    | "AI_MODEL_UNAVAILABLE"
+    | "INTERNAL_API_ERROR"
+    | "PAYLOAD_TOO_LARGE";
+  retryAfterMs: number | null;
+  requestId: string;
+  operation: string;
+  retryable: boolean;
+  message: string;
+  status: number;
+};
+
+function normalizeProviderError(err: any, requestId: string, operation: string): NormalizedApiError {
+  const msg: string = err?.message ?? 'Internal API processing failed';
+  let code: NormalizedApiError['code'] = "INTERNAL_API_ERROR";
+  let status = 500;
+  let retryable = false;
+  let retryAfterMs: number | null = null;
+
+  // 1. Validation Errors (400)
+  if (err?.status === 400 || msg.includes('INVALID_ARGUMENT')) {
+    code = "INVALID_REQUEST";
+    status = 400;
+    retryable = false;
+  }
+  // 2. Model Unavailable Errors
+  else if (err?.status === 404 || msg.includes('NOT_FOUND') || msg.includes('no longer available')) {
+    code = "AI_MODEL_UNAVAILABLE";
+    status = 503;
+    retryable = false;
+  }
+  // 3. Payload Too Large
+  else if (err?.status === 413 || msg.includes('payload too large') || msg.includes('maximum context')) {
+    code = "PAYLOAD_TOO_LARGE";
+    status = 413;
+    retryable = false;
+  }
+  // 4. Timeout
+  else if (err?.status === 504 || msg.includes('timeout')) {
+    code = "AI_PROVIDER_TIMEOUT";
+    status = 504;
+    retryable = true;
+  }
+  // 5. Rate Limits (429) & Transient Unavailable (503)
+  else if (err?.status === 429 || msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
+    code = "RATE_LIMITED";
+    status = 429;
+    retryable = true;
+  }
+  else if (err?.status === 503 || msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('fetch failed')) {
+    code = "AI_PROVIDER_UNAVAILABLE";
+    status = 503;
+    retryable = true;
+  }
+
+  // Extract Retry Delay if rate limited or transient
+  if (retryable) {
+    // 1. HTTP Retry-After header
+    if (err?.headers && err.headers['retry-after']) {
+      const ra = parseInt(err.headers['retry-after'], 10);
+      if (!isNaN(ra)) retryAfterMs = ra * 1000;
+    }
+
+    // 2. Structured SDK field or embedded message
+    if (!retryAfterMs && typeof msg === 'string') {
+      const matchDelay = msg.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/i);
+      const matchIn = msg.match(/retry in (\d+(?:\.\d+)?)s/i) || msg.match(/(\d+(?:\.\d+)?)s/i); // More generous matching
+      if (matchDelay && matchDelay[1]) {
+        retryAfterMs = parseFloat(matchDelay[1]) * 1000;
+      } else if (matchIn && matchIn[1]) {
+        retryAfterMs = parseFloat(matchIn[1]) * 1000;
+      }
+    }
+
+    // Sanitize retry delay
+    if (retryAfterMs !== null) {
+      const MIN_RETRY_DELAY_MS = 5000;
+      const MAX_RETRY_DELAY_MS = 60000;
+      retryAfterMs = Math.max(MIN_RETRY_DELAY_MS, Math.min(MAX_RETRY_DELAY_MS, retryAfterMs));
+    }
+  }
+
+  return {
+    code,
+    retryAfterMs,
+    requestId,
+    operation,
+    retryable,
+    message: msg,
+    status
+  };
+}
+
 // ── Vercel Serverless entry point ─────────────────────────────────────────────
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -1153,6 +1254,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(404).json({ error: { code: 'UNKNOWN_METHOD', message: `Unknown method: ${method}` } });
   }
 
+  const requestId = Array.isArray(req.headers['x-request-id']) ? req.headers['x-request-id'][0] : (req.headers['x-request-id'] || crypto.randomUUID());
+
   try {
     const result = await Promise.race([
       handle(payload ?? {}),
@@ -1165,40 +1268,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ]);
     return res.status(200).json(result);
   } catch (err: any) {
-    if (err && err.status === 400) {
-      console.warn(`[api/ai] Validation failed:`, err.message);
-      return res.status(400).json({ error: { code: 'INVALID_REQUEST', message: err.message } });
+    const normalizedError = normalizeProviderError(err, requestId, method);
+    
+    if (normalizedError.status >= 500) {
+      console.error(`[api/ai] ${method} failed:`, err);
+    } else {
+      console.warn(`[api/ai] ${method} returned ${normalizedError.code}:`, normalizedError.message);
     }
 
-    if (err && (err.status === 503 || err.status === 504)) {
-      return res.status(err.status).json({ error: { code: err.code || 'AI_PROVIDER_UNAVAILABLE', message: err.message } });
-    }
-
-    const msg: string = err?.message ?? 'Internal API processing failed';
-    const isConfig = msg.includes('GEMINI_API_KEY');
-
-    if (isConfig) {
-      return res.status(503).json({ error: { code: 'AI_PROVIDER_UNAVAILABLE', message: 'AI service is not configured' } });
-    }
-
-    if (err?.status === 404 || msg.includes('NOT_FOUND') || msg.includes('no longer available')) {
-      console.warn(`[api/ai] Model unavailable:`, msg);
-      return res.status(503).json({
-        error: {
-          code: 'AI_MODEL_UNAVAILABLE',
-          message: msg,
-          provider: 'LIVE',
-          model: MODEL,
-          operation: method,
-        },
-      });
-    }
-
-    console.error(`[api/ai] ${method} failed:`, err);
-    return res.status(500).json({
+    return res.status(normalizedError.status).json({
       error: {
-        code: 'INTERNAL_API_ERROR',
-        message: msg,
+        code: normalizedError.code,
+        message: normalizedError.message,
+        retryAfterMs: normalizedError.retryAfterMs,
+        requestId: normalizedError.requestId,
+        operation: normalizedError.operation,
+        isRetryable: normalizedError.retryable, // For frontend compatibility
+        retryable: normalizedError.retryable
       },
     });
   }

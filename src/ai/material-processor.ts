@@ -12,11 +12,12 @@ import type {
   DocumentOmission,
   CoverageEntry,
 } from '../types';
+import { ClientRequestScheduler } from './scheduler.ts';
+import type { PersistedJobState, OperationPhase } from './types';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MAX_CHUNK_CHARS = 30_000;
-const CONCURRENCY = 3;
 const MAX_AUDIT_CYCLES = 2;
 
 // Hierarchical aggregation: if full payload > this, batch chunks before final synthesis
@@ -177,68 +178,11 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T
   throw new Error('Unreachable');
 }
 
-async function callDiscoverChunkTopics(materialText: string, materialTitle: string, materialId: string, materialVersion: number) {
-  return callWithRetry(async () => {
-    const response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method: 'discoverChunkTopics',
-        payload: { materialText, materialTitle, materialId, materialVersion },
-      }),
-    });
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      throw {
-        status: response.status,
-        message: `Topic discovery failed (${response.status}): ${errData?.error?.message || 'Unknown'}`,
-      };
-    }
-    return response.json();
-  });
-}
 
-async function callMergeTopicCandidates(materialTitle: string, chunkTopics: any[], materialId: string, materialVersion: number) {
-  return callWithRetry(async () => {
-    const response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method: 'mergeTopicCandidates',
-        payload: { materialTitle, chunkTopics, materialId, materialVersion },
-      }),
-    });
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      throw {
-        status: response.status,
-        message: `Topic merge failed (${response.status}): ${errData?.error?.message || 'Unknown'}`,
-      };
-    }
-    return response.json();
-  });
-}
 
-async function callExtractChunkIntelligence(materialText: string, materialTitle: string, materialId: string, materialVersion: number) {
-  return callWithRetry(async () => {
-    const response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method: 'extractChunkIntelligence',
-        payload: { materialText, materialTitle, materialId, materialVersion },
-      }),
-    });
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      throw {
-        status: response.status,
-        message: `Chunk extraction failed (${response.status}): ${errData?.error?.message || 'Unknown'}`,
-      };
-    }
-    return response.json();
-  });
-}
+
+
+
 
 async function callAggregateMaterial(
   materialTitle: string,
@@ -496,142 +440,132 @@ export class MaterialProcessor {
     };
 
     // ════════════════════════════════════════════════════════════════════
-    // PHASE 0: TOPIC DISCOVERY (Explicit Outline Generation)
+    // SCHEDULER INITIALIZATION
     // ════════════════════════════════════════════════════════════════════
     
-    let globalDocumentOutline: DocumentOutlineItem[] = [];
-    
-    try {
-      // 1. Discover local topics per chunk
-      const localTopicsPromises = chunks.map((chunk, idx) => {
-        const pageStart = chunk.pages.length > 0 ? Math.min(...chunk.pages) : 1;
-        const pageEnd = chunk.pages.length > 0 ? Math.max(...chunk.pages) : 1;
-        const chunkTitle = `${title} (Pages ${pageStart}–${pageEnd})`;
-        return callDiscoverChunkTopics(chunk.text, chunkTitle, options?.materialId || 'unknown', manifest.materialVersion)
-          .then(res => res.localTopics || [])
-          .catch(err => {
-            console.warn(`[MaterialProcessor] Topic discovery failed for chunk ${idx}:`, err);
-            return [];
-          });
-      });
-      
-      const localTopicsArray = await Promise.all(localTopicsPromises);
-      const flattenedTopics = localTopicsArray.flat();
-      
-      // 2. Merge topic candidates into a document outline
-      if (flattenedTopics.length > 0) {
-        const mergeResult = await callMergeTopicCandidates(title, flattenedTopics, options?.materialId || 'unknown', manifest.materialVersion);
-        globalDocumentOutline = mergeResult.documentOutline || [];
-        manifest.topicsDiscovered = globalDocumentOutline.length;
-      }
-    } catch (e) {
-      console.error('[MaterialProcessor] Phase 0 (Topic Discovery) failed, falling back:', e);
-      // Fallback is just empty documentOutline, audit completeness will still work
-    }
-
-    // ════════════════════════════════════════════════════════════════════
-    // PHASE 1: CHUNK INTELLIGENCE (progressive — never abort on failure)
-    // ════════════════════════════════════════════════════════════════════
-
+    const scheduler = await ClientRequestScheduler.getInstance(manifest.processingRunId, 'conservative');
     const chunkIntelligences: ChunkIntelligence[] = [];
     const failedChunkIndices: number[] = [];
     let visualLimitationsNoted = false;
 
-    manifest.chunkProcessingStatus = 'processing';
-    if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
-
-    let i = 0;
-    while (i < chunks.length) {
-      const batch = chunks.slice(i, i + CONCURRENCY);
-
-      const batchResults = await Promise.allSettled(
-        batch.map(async (chunk, batchIdx) => {
-          const chunkIndex = i + batchIdx;
-          const pageStart = chunk.pages.length > 0 ? Math.min(...chunk.pages) : 1;
-          const pageEnd = chunk.pages.length > 0 ? Math.max(...chunk.pages) : 1;
-          const chunkHash = computeHash(chunk.text);
-
-          const pageRange = chunk.pages.length > 0 ? ` (Pages ${pageStart}–${pageEnd})` : '';
-          const chunkTitle = `${title}${pageRange}`;
-
-          const aiResult = await callExtractChunkIntelligence(
-            chunk.text, 
-            chunkTitle, 
-            options?.materialId || 'unknown', 
-            manifest.materialVersion
-          );
-
-          // Note visual limitations
-          if (aiResult.visualLimitations?.length > 0) {
-            visualLimitationsNoted = true;
-          }
-
+    scheduler.setCallbacks(
+      (job: PersistedJobState, result: any) => {
+        if (job.operation === 'chunk') {
+          const chunkHash = computeHash(job.payload.materialText);
           const chunkIntel: ChunkIntelligence = {
             processingRunId: manifest.processingRunId,
             materialId: options?.materialId || 'unknown',
             materialVersion: manifest.materialVersion,
             chunkId: crypto.randomUUID(),
             chunkHash,
-            chunkIndex,
-            pageStart,
-            pageEnd,
-            concepts: aiResult.concepts || [],
-            keyTerms: aiResult.keyTerms || [],
-            keyIdeas: aiResult.keyIdeas || [],
-            importantResults: aiResult.importantResults || [],
-            relationships: aiResult.relationships || [],
-            groundedClaims: aiResult.groundedClaims || [],
+            chunkIndex: job.payload.chunkIndex,
+            pageStart: job.payload.pageStart,
+            pageEnd: job.payload.pageEnd,
+            concepts: result.concepts || [],
+            keyTerms: result.keyTerms || [],
+            keyIdeas: result.keyIdeas || [],
+            importantResults: result.importantResults || [],
+            relationships: result.relationships || [],
+            groundedClaims: result.groundedClaims || [],
             sourceReferences: [],
           };
+          (chunkIntel as any).formulas = result.formulas || [];
+          (chunkIntel as any).visualLimitations = result.visualLimitations || [];
+          (chunkIntel as any).tableNotes = result.tableNotes || [];
+          
+          if (result.visualLimitations?.length > 0) visualLimitationsNoted = true;
 
-          // Attach formulas to chunk (stored separately for aggregation)
-          (chunkIntel as any).formulas = aiResult.formulas || [];
-          (chunkIntel as any).visualLimitations = aiResult.visualLimitations || [];
-          (chunkIntel as any).tableNotes = aiResult.tableNotes || [];
-
-          return { chunkIndex, chunkIntel };
-        })
-      );
-
-      // Process results — persist successes, record failures (NEVER throw)
-      for (let b = 0; b < batchResults.length; b++) {
-        const batchResult = batchResults[b];
-        const chunkIndex = i + b;
-
-        if (batchResult.status === 'fulfilled') {
-          chunkIntelligences.push(batchResult.value.chunkIntel);
+          chunkIntelligences.push(chunkIntel);
           manifest.completedChunks++;
-        } else {
-          console.error(`[MaterialProcessor] Chunk ${chunkIndex} failed:`, batchResult.reason);
-          failedChunkIndices.push(chunkIndex);
-          manifest.failedChunks++;
+          if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
         }
+      },
+      (job: PersistedJobState, isTerminal: boolean) => {
+        if (job.operation === 'chunk' && isTerminal) {
+          if (job.status === 'PROCESSING_PAUSED') {
+            pausedChunkIndices.push(job.payload.chunkIndex);
+          } else {
+            failedChunkIndices.push(job.payload.chunkIndex);
+            manifest.failedChunks++;
+          }
+          if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
+        }
+      },
+      (msg: string) => {
+        console.log(`[Scheduler] ${msg}`);
       }
+    );
 
-      // Persist successful chunks immediately via onProgress
-      if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
-      i += CONCURRENCY;
-    }
+    // ════════════════════════════════════════════════════════════════════
+    // PHASE 0: TOPIC DISCOVERY (Optional / Bypassed for now)
+    // ════════════════════════════════════════════════════════════════════
+    let globalDocumentOutline: DocumentOutlineItem[] = [];
 
-    // Update manifest after chunk phase
+    // ════════════════════════════════════════════════════════════════════
+    // PHASE 1: CHUNK INTELLIGENCE (Durable Scheduler)
+    // ════════════════════════════════════════════════════════════════════
+    manifest.chunkProcessingStatus = 'processing';
+    if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
+
+    const chunkJobs = chunks.map((chunk, idx) => {
+      const pageStart = chunk.pages.length > 0 ? Math.min(...chunk.pages) : 1;
+      const pageEnd = chunk.pages.length > 0 ? Math.max(...chunk.pages) : 1;
+      const chunkTitle = `${title} (Pages ${pageStart}–${pageEnd})`;
+      
+      return {
+        jobId: `chunk-${manifest.processingRunId}-${idx}`,
+        processingRunId: manifest.processingRunId,
+        materialVersion: manifest.materialVersion,
+        sourceFingerprint,
+        operation: 'chunk' as OperationPhase,
+        priority: 10,
+        payload: {
+          materialText: chunk.text,
+          materialTitle: chunkTitle,
+          materialId: options?.materialId || 'unknown',
+          materialVersion: manifest.materialVersion,
+          chunkIndex: idx,
+          pageStart,
+          pageEnd
+        }
+      };
+    });
+
+    const pausedChunkIndices: number[] = [];
+
+    await scheduler.enqueueJobs(chunkJobs);
+    await scheduler.start();
+
+    // Block until chunks are finished
+    await scheduler.waitForPhase('chunk');
+
     manifest.failedChunkIndices = failedChunkIndices;
-    manifest.isPartial = failedChunkIndices.length > 0;
+    manifest.isPartial = failedChunkIndices.length > 0 || pausedChunkIndices.length > 0;
 
-    if (chunkIntelligences.length === 0) {
-      // ALL chunks failed — nothing to aggregate
-      manifest.chunkProcessingStatus = 'failed';
+    if (chunkIntelligences.length === 0 && chunks.length > 0) {
+      manifest.chunkProcessingStatus = pausedChunkIndices.length > 0 ? 'paused' as any : 'failed';
       manifest.aggregationStatus = 'failed';
       if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
-      throw new Error(
-        `All ${chunks.length} chunks failed to process. Cannot produce document intelligence. ` +
-        `Check API availability and retry.`
-      );
+      if (pausedChunkIndices.length > 0) {
+        throw new Error(`RATE_LIMIT_RETRY_EXHAUSTED: AI SERVICE RATE LIMITED. ConceptIQ has preserved your document. Processed: 0 / ${chunks.length}. Waiting to retry: ${pausedChunkIndices.length}`);
+      } else {
+        throw new Error(`All chunks failed to process. Check API availability and retry.`);
+      }
     }
 
-    if (failedChunkIndices.length > 0) {
+    if (pausedChunkIndices.length > 0) {
+      manifest.chunkProcessingStatus = 'paused' as any;
+    } else if (failedChunkIndices.length > 0) {
       manifest.chunkProcessingStatus = 'partial';
     } else {
       manifest.chunkProcessingStatus = 'succeeded';
+    }
+    
+    // Aggregation cannot proceed if chunks are incomplete or paused
+    if (manifest.isPartial) {
+      manifest.aggregationStatus = 'paused' as any;
+      if (options?.onProgress) options.onProgress(manifest, chunkIntelligences);
+      return { processed: null as any, manifest, chunks: chunkIntelligences }; // Return early
     }
 
     // ════════════════════════════════════════════════════════════════════

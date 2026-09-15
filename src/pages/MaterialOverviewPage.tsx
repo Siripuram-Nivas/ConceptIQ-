@@ -75,6 +75,34 @@ export function MaterialOverviewPage() {
     );
   }
 
+  if (processingStatus === 'rate_limited') {
+    return (
+      <div className="min-h-screen bg-bg flex flex-col items-center justify-center px-5">
+        <div className="text-center space-y-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-accent-yellow/10 mb-4">
+            <AlertTriangle size={24} className="text-accent-yellow animate-pulse" />
+          </div>
+          <h2 className="font-display font-bold text-display-md text-fg">AI Provider Rate Limited</h2>
+          <p className="text-muted text-sm max-w-md mx-auto">Processing has hit an AI quota limit. ConceptIQ is automatically pacing requests and will resume when the quota refreshes. Your extraction progress is safely saved.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (processingStatus === 'paused') {
+    return (
+      <div className="min-h-screen bg-bg flex flex-col items-center justify-center px-5">
+        <div className="text-center space-y-4">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-surface-strong mb-4">
+            <Presentation size={24} className="text-muted" />
+          </div>
+          <h2 className="font-display font-bold text-display-md text-fg">Processing Paused</h2>
+          <p className="text-muted text-sm max-w-md mx-auto">Extraction was paused to conserve API budgets or due to a browser tab change. You can resume processing later from the dashboard.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (processingStatus === 'failed' || (!processedContent && processingStatus !== 'partial')) {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center px-5">
