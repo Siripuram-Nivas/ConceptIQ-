@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, BrainCircuit, Zap, Presentation, AlertTriangle, MoreVertical, Trash2, CheckCircle, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, BrainCircuit, Zap, Presentation, AlertTriangle, MoreVertical, Trash2, CheckCircle, FileText, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
 import { useStudySpaceStore } from '../store/study-space-store';
 import { useSessionStore } from '../store/session-store';
 import { DemoModeIndicator } from '../components/DemoModeIndicator';
@@ -58,7 +58,9 @@ export function MaterialOverviewPage() {
     );
   }
 
-  const { processedContent, processingStatus, isDemoMode } = currentMaterial;
+  const { processedContent, isDemoMode } = currentMaterial;
+  // Cast required: Zustand's inferred type is narrower than MaterialStatus
+  const processingStatus = currentMaterial.processingStatus as string;
 
   if (processingStatus === 'processing') {
     return (
@@ -89,15 +91,61 @@ export function MaterialOverviewPage() {
     );
   }
 
-  if (processingStatus === 'paused') {
+  if (processingStatus === 'paused' || processingStatus === 'rate_limited' || processingStatus === 'partial' && !processedContent) {
+    const m = currentMaterial.manifest;
+    const completed = m?.completedChunks ?? 0;
+    const total = m?.totalChunks ?? 0;
+    const failed = m?.failedChunks ?? 0;
+    // pendingChunks is not stored directly; calculate from totals
+    const retrying = total > 0 ? Math.max(0, total - completed - failed) : 0;
+
+    const handleResumeProcessing = async () => {
+      const { addMaterialToSpace } = useStudySpaceStore.getState();
+      const rawContent = currentMaterial.rawContent ?? '';
+      try {
+        await addMaterialToSpace(currentMaterial.studySpaceId ?? '', null, rawContent);
+      } catch (e) {
+        console.error('[Resume] Failed to resume processing:', e);
+      }
+    };
+
     return (
       <div className="min-h-screen bg-bg flex flex-col items-center justify-center px-5">
-        <div className="text-center space-y-4">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-surface-strong mb-4">
-            <Presentation size={24} className="text-muted" />
+        <div className="text-center space-y-6 max-w-lg">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-accent-yellow/10 mb-4">
+            <AlertTriangle size={24} className="text-accent-yellow" />
           </div>
           <h2 className="font-display font-bold text-display-md text-fg">Processing Paused</h2>
-          <p className="text-muted text-sm max-w-md mx-auto">Extraction was paused to conserve API budgets or due to a browser tab change. You can resume processing later from the dashboard.</p>
+          <p className="text-muted text-sm">
+            Extraction was paused — your document is safe and all completed work is preserved.
+          </p>
+
+          {/* Chunk progress stats */}
+          <div className="grid grid-cols-3 gap-4 my-4">
+            <div className="bg-surface rounded-lg p-4">
+              <div className="text-2xl font-bold text-green-400">{completed}</div>
+              <div className="text-xs text-muted mt-1">Processed</div>
+            </div>
+            <div className="bg-surface rounded-lg p-4">
+              <div className="text-2xl font-bold text-accent-yellow">{retrying}</div>
+              <div className="text-xs text-muted mt-1">Waiting</div>
+            </div>
+            <div className="bg-surface rounded-lg p-4">
+              <div className="text-2xl font-bold text-red-400">{failed}</div>
+              <div className="text-xs text-muted mt-1">Failed</div>
+            </div>
+          </div>
+          <p className="text-xs text-muted">Total: {completed} / {total} chunks processed</p>
+
+          <button
+            id="resume-processing-btn"
+            onClick={handleResumeProcessing}
+            className="inline-flex items-center gap-2 px-6 py-3 bg-ai text-white font-bold rounded-lg hover:bg-ai/80 transition-colors mt-4"
+          >
+            <RefreshCw size={16} />
+            RESUME PROCESSING
+          </button>
+          <p className="text-xs text-muted/60">This will continue from where extraction stopped.</p>
         </div>
       </div>
     );
@@ -177,6 +225,34 @@ export function MaterialOverviewPage() {
         {isDemoMode && (
           <div className="mb-8">
             <span className="inline-block px-3 py-1 bg-accent-yellow text-fg text-xs font-bold uppercase tracking-wider">Demo Material</span>
+          </div>
+        )}
+
+        {/* Partial Extraction Banner (P1-C fix) */}
+        {processingStatus === 'partial' && (
+          <div className="mb-8 p-4 bg-accent-yellow/10 border border-accent-yellow/30 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={18} className="text-accent-yellow mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-sm font-bold text-accent-yellow mb-1">PARTIAL EXTRACTION</p>
+                <p className="text-sm text-muted mb-2">
+                  ConceptIQ processed {currentMaterial.manifest?.completedChunks ?? '?'} of {currentMaterial.manifest?.totalChunks ?? '?'} source units.
+                  {(currentMaterial.manifest?.failedChunks ?? 0) > 0 && ` ${currentMaterial.manifest?.failedChunks} section(s) could not be processed.`}
+                  {' '}What you see below is valid but may be incomplete.
+                </p>
+                <button
+                  id="partial-resume-btn"
+                  onClick={async () => {
+                    const { addMaterialToSpace } = useStudySpaceStore.getState();
+                    const rawContent = currentMaterial.rawContent ?? '';
+                    await addMaterialToSpace(currentMaterial.studySpaceId ?? '', null, rawContent).catch(console.error);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-accent-yellow hover:text-white border border-accent-yellow/50 hover:border-accent-yellow px-3 py-1.5 rounded transition-colors"
+                >
+                  <RefreshCw size={11} /> RESUME PROCESSING
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

@@ -76,24 +76,33 @@ export class ClientRequestScheduler {
   private onJobComplete?: (job: PersistedJobState, result: any) => void;
   private onJobFailed?: (job: PersistedJobState, isTerminal: boolean) => void;
   private onProgress?: (msg: string) => void;
+  /** Stored so we can clear it in destroy() */
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   private constructor(processingRunId: string, profile: SchedulerProfile = 'conservative') {
     this.processingRunId = processingRunId;
     this.config = PROFILES[profile] || PROFILES.conservative;
+    // Each scheduler instance has a unique ID — used for lease ownership verification.
     this.ownerId = crypto.randomUUID();
   }
 
   static async getInstance(processingRunId: string, profile?: SchedulerProfile): Promise<ClientRequestScheduler> {
+    // Return the in-memory scheduler if we already own it in this tab
     if (activeSchedulers.has(processingRunId)) {
       return activeSchedulers.get(processingRunId)!;
     }
-    
-    // Check if another tab owns the lease
+
+    // Check if another tab/instance holds an unexpired lease for this run
     const lease = await get<RunLease>(`lease_${processingRunId}`);
     const now = Date.now();
-    if (lease && lease.leaseUntil > now && lease.ownerId !== 'current') { // Simplified check
-      // Another active lease exists
-      // Wait, we need to handle this properly, but for the hackathon, we can just takeover if we are explicitly resuming
+    if (lease && lease.leaseUntil > now) {
+      // Another owner holds the lease — this tab must not start a duplicate.
+      // (The lease will expire after 15 s if the owning tab crashes.)
+      throw new Error(
+        `SCHEDULER_LEASE_CONFLICT: Processing run ${processingRunId} is already owned by ${lease.ownerId}. ` +
+        `Lease expires in ${Math.ceil((lease.leaseUntil - now) / 1000)}s. ` +
+        `If this tab is the intended owner (e.g. a resume), destroy the other scheduler first.`
+      );
     }
 
     const scheduler = new ClientRequestScheduler(processingRunId, profile);
@@ -165,10 +174,12 @@ export class ClientRequestScheduler {
     this.isRunning = true;
     this.isPaused = false;
     this.tick();
-    
-    // Heartbeat loop
-    setInterval(() => {
-      if (!this.isPaused) this.heartbeatLease();
+
+    // Start heartbeat — stored so destroy() can clear it
+    this.heartbeatTimer = setInterval(() => {
+      if (this.isRunning && !this.isPaused) {
+        this.heartbeatLease();
+      }
     }, 5000);
   }
 
@@ -357,5 +368,31 @@ export class ClientRequestScheduler {
       
       await new Promise(r => setTimeout(r, 1000));
     }
+  }
+  /**
+   * Cleanly stops the scheduler:
+   * - Clears the heartbeat timer (no orphaned setInterval)
+   * - Marks the scheduler as not running
+   * - Removes the in-memory instance so a new scheduler can be created for resume
+   * Call this when the owning component unmounts or processing completes.
+   */
+  destroy() {
+    this.isRunning = false;
+    this.isPaused = true;
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    activeSchedulers.delete(this.processingRunId);
+    if (this.onProgress) this.onProgress('Scheduler destroyed.');
+  }
+
+  /**
+   * Force-acquire the lease for this scheduler instance.
+   * Use this to take over from a crashed/stale scheduler (e.g. after lease expiry).
+   * Only call when you are certain the previous owner is gone.
+   */
+  async forceAcquireLease() {
+    await this.acquireLease();
   }
 }

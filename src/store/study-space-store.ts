@@ -228,6 +228,43 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
           const processed = result.processed;
           const finalManifest = result.manifest;
 
+          // ── Partial/Paused result handling (P0-A fix) ─────────────────────
+          // MaterialProcessor returns { processed: null } when rate-limited/paused
+          // before aggregation. We must NOT convert this into 'failed'.
+          if (processed === null) {
+            // Determine the real status from the manifest
+            const manifestStatus = finalManifest.chunkProcessingStatus;
+            let partialStatus: 'paused' | 'partial' | 'rate_limited' | 'failed' = 'partial';
+            if ((manifestStatus as string) === 'paused') {
+              partialStatus = 'paused';
+            } else if (finalManifest.isPartial && finalManifest.completedChunks > 0) {
+              partialStatus = 'partial';
+            } else if (finalManifest.completedChunks === 0) {
+              // Nothing was processed — real failure
+              partialStatus = 'failed';
+            }
+
+            const rateLimitMsg = `Processing ${partialStatus === 'failed' ? 'failed' : 'paused'}. `
+              + `Completed: ${finalManifest.completedChunks}/${finalManifest.totalChunks} chunks. `
+              + (finalManifest.failedChunks > 0 ? `Failed: ${finalManifest.failedChunks}.` : '');
+
+            set((state) => ({
+              materials: state.materials.map((m) =>
+                m.id === materialId
+                  ? {
+                    ...m,
+                    processingStatus: partialStatus,
+                    manifest: finalManifest,
+                    rawContent: contentToProcess,
+                    pptxWarnings: partialStatus !== 'failed' ? undefined : [rateLimitMsg],
+                  }
+                  : m
+              ),
+            }));
+            return; // Do not proceed to activity recording — no full intelligence
+          }
+
+          // ── Full or partial-but-aggregated result ─────────────────────────
           // For PPTX, update source references to say "Slide N" not "Page N"
           if (isPptx) {
             processed.sections = processed.sections.map((section, idx) => ({
@@ -252,12 +289,15 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
             }));
           }
 
+          // Determine final status: partial if some chunks failed but we still have intelligence
+          const finalStatus: 'ready' | 'partial' = finalManifest.isPartial ? 'partial' : 'ready';
+
           set((state) => ({
             materials: state.materials.map((m) =>
               m.id === materialId
                 ? {
                   ...m,
-                  processingStatus: 'ready',
+                  processingStatus: finalStatus,
                   processedContent: processed,
                   manifest: finalManifest,
                   rawContent: contentToProcess,
@@ -271,9 +311,10 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
           get().mergeConceptsToMap(spaceId, processed.concepts, relationships);
 
           // Record activity
+          const partialNote = finalStatus === 'partial' ? ' (partial — some content unavailable)' : '';
           const materialDesc = isPptx && slideCount !== undefined
-            ? `Added "${title}" (${slideCount} slides) and extracted ${processed.concepts.length} concepts.`
-            : `Added "${title}" and extracted ${processed.concepts.length} concepts.`;
+            ? `Added "${title}" (${slideCount} slides) and extracted ${processed.concepts.length} concepts${partialNote}.`
+            : `Added "${title}" and extracted ${processed.concepts.length} concepts${partialNote}.`;
 
           get().addActivity(spaceId, {
             type: 'material_added',
@@ -285,9 +326,17 @@ export const useStudySpaceStore = create<StudySpaceStore>()(
         } catch (error) {
           console.error('Material processing failed:', error);
           const errMsg = error instanceof Error ? error.message : 'Processing failed';
+          // Determine if this is a rate-limit-induced pause or a true failure
+          const isRateLimitPause = errMsg.includes('RATE_LIMIT_RETRY_EXHAUSTED') || errMsg.includes('PROCESSING_PAUSED');
           set((state) => ({
             materials: state.materials.map((m) =>
-              m.id === materialId ? { ...m, processingStatus: 'failed', pptxWarnings: [errMsg] } : m
+              m.id === materialId
+                ? {
+                  ...m,
+                  processingStatus: isRateLimitPause ? 'paused' : 'failed',
+                  pptxWarnings: [errMsg],
+                }
+                : m
             ),
           }));
         }

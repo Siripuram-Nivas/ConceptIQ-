@@ -8,21 +8,29 @@ export interface AIProvider {
   evaluateReExplanation(session: LearningSession, reExplanation: string, materialContext: string): Promise<SessionAnalysis>;
 }
 
-export type NormalizedErrorCode = 
-  | 'RATE_LIMITED' 
-  | 'INVALID_SCHEMA' 
-  | 'PAYLOAD_TOO_LARGE'
-  | 'SERVER_ERROR'
-  | 'UNAUTHORIZED'
-  | 'UNKNOWN';
+/**
+ * Normalized error codes — must exactly match the backend set in api/ai.ts.
+ * NEVER add codes here that don't exist on the backend, and vice-versa.
+ */
+export type NormalizedErrorCode =
+  | 'RATE_LIMITED'
+  | 'AI_PROVIDER_UNAVAILABLE'
+  | 'AI_PROVIDER_TIMEOUT'
+  | 'AI_MODEL_UNAVAILABLE'
+  | 'INVALID_REQUEST'
+  | 'INTERNAL_API_ERROR'
+  | 'PAYLOAD_TOO_LARGE';
 
 export interface NormalizedApiError {
   code: NormalizedErrorCode;
   message: string;
   retryAfterMs: number | null;
-  requestId?: string;
-  operation?: string;
+  requestId: string;
+  operation: OperationPhase | string;
+  /** isRetryable is the canonical field name on the frontend */
   isRetryable: boolean;
+  /** retryable is the alias sent by the backend */
+  retryable?: boolean;
 }
 
 export type SchedulerProfile = 'conservative' | 'normal' | 'aggressive';
@@ -71,3 +79,4 @@ export interface RunLease {
   heartbeatAt: number;
   leaseUntil: number;
 }
+

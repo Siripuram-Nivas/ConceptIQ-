@@ -159,7 +159,12 @@ function computeHash(text: string): string {
   return Math.abs(hash).toString(16);
 }
 
-async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+/**
+ * Network-only retry for transient infrastructure failures (502/503/504/fetch failed).
+ * Explicitly does NOT retry 429 — that is the scheduler's responsibility.
+ * Only used for aggregation/audit/recovery (post-chunk phases).
+ */
+async function callWithNetworkRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
   let attempt = 0;
   while (attempt <= maxRetries) {
     try {
@@ -167,6 +172,7 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T
     } catch (err: any) {
       if (attempt === maxRetries) throw err;
       const status = err.status || 500;
+      // 429 must NOT be retried here — let it propagate to the caller
       const shouldRetry =
         status === 502 || status === 503 || status === 504 ||
         err.message?.includes('fetch failed');
@@ -184,6 +190,32 @@ async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T
 
 
 
+/**
+ * Single authenticated fetch to /api/ai. Throws a normalized error on non-2xx.
+ * 429 errors are NOT retried here — callers must handle them at the scheduler level.
+ */
+async function callApiMethod(method: string, payload: object): Promise<any> {
+  const response = await fetch('/api/ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ method, payload }),
+  });
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({ error: { message: 'Unknown error', code: 'INTERNAL_API_ERROR' } }));
+    // Propagate normalized error fields so the scheduler retry path can inspect them
+    const normalized = errData?.error || {};
+    throw {
+      status: response.status,
+      code: normalized.code || 'INTERNAL_API_ERROR',
+      message: normalized.message || `${method} failed (${response.status})`,
+      retryAfterMs: normalized.retryAfterMs ?? null,
+      isRetryable: normalized.isRetryable ?? normalized.retryable ?? (response.status === 429 || response.status >= 500),
+      requestId: normalized.requestId,
+    };
+  }
+  return response.json();
+}
+
 async function callAggregateMaterial(
   materialTitle: string,
   chunks: any[],
@@ -191,24 +223,9 @@ async function callAggregateMaterial(
   materialVersion: number,
   isPartial = false
 ) {
-  return callWithRetry(async () => {
-    const response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method: 'aggregateMaterial',
-        payload: { materialTitle, chunks, isPartial, materialId, materialVersion },
-      }),
-    });
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      throw {
-        status: response.status,
-        message: `Aggregation failed (${response.status}): ${errData?.error?.message || 'Unknown'}`,
-      };
-    }
-    return response.json();
-  });
+  return callWithNetworkRetry(() =>
+    callApiMethod('aggregateMaterial', { materialTitle, chunks, isPartial, materialId, materialVersion })
+  );
 }
 
 async function callAuditCompleteness(
@@ -220,24 +237,9 @@ async function callAuditCompleteness(
   materialId: string,
   materialVersion: number
 ) {
-  return callWithRetry(async () => {
-    const response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method: 'auditCompleteness',
-        payload: { materialTitle, documentOutline, topicExplanations, formulas, importantResults, materialId, materialVersion },
-      }),
-    });
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      throw {
-        status: response.status,
-        message: `Completeness audit failed (${response.status}): ${errData?.error?.message || 'Unknown'}`,
-      };
-    }
-    return response.json();
-  });
+  return callWithNetworkRetry(() =>
+    callApiMethod('auditCompleteness', { materialTitle, documentOutline, topicExplanations, formulas, importantResults, materialId, materialVersion })
+  );
 }
 
 async function callRecoverMissingTopics(
@@ -247,24 +249,9 @@ async function callRecoverMissingTopics(
   materialId: string,
   materialVersion: number
 ) {
-  return callWithRetry(async () => {
-    const response = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method: 'recoverMissingTopics',
-        payload: { materialTitle, missingTopics, relevantChunks, materialId, materialVersion },
-      }),
-    });
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-      throw {
-        status: response.status,
-        message: `Recovery failed (${response.status}): ${errData?.error?.message || 'Unknown'}`,
-      };
-    }
-    return response.json();
-  });
+  return callWithNetworkRetry(() =>
+    callApiMethod('recoverMissingTopics', { materialTitle, missingTopics, relevantChunks, materialId, materialVersion })
+  );
 }
 
 // ── Demo-only helpers ─────────────────────────────────────────────────────────
@@ -444,8 +431,10 @@ export class MaterialProcessor {
     // ════════════════════════════════════════════════════════════════════
     
     const scheduler = await ClientRequestScheduler.getInstance(manifest.processingRunId, 'conservative');
+    // ── Declare all mutable state BEFORE setCallbacks (avoid TDZ) ────────────
     const chunkIntelligences: ChunkIntelligence[] = [];
     const failedChunkIndices: number[] = [];
+    const pausedChunkIndices: number[] = [];
     let visualLimitationsNoted = false;
 
     scheduler.setCallbacks(
@@ -531,7 +520,7 @@ export class MaterialProcessor {
       };
     });
 
-    const pausedChunkIndices: number[] = [];
+    // pausedChunkIndices declared above before setCallbacks (TDZ-safe)
 
     await scheduler.enqueueJobs(chunkJobs);
     await scheduler.start();
